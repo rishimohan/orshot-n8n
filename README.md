@@ -1,6 +1,6 @@
 ## Local setup
 
-Install n8n locally.
+Install n8n locally. (https://docs.n8n.io/integrations/creating-nodes/test/run-node-locally/)
 
 Build the node
 
