@@ -27,7 +27,7 @@ export class Orshot implements INodeType {
 		group: ['transform'],
 		icon: 'file:orshot.svg',
 		version: 1,
-		description: 'Render images from templates using Orshot API',
+		description: 'Automated Image Generation from pre-designed and AI generated templates',
 		defaults: {
 			name: 'Orshot',
 		},
