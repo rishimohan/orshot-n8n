@@ -25,10 +25,8 @@ Follow the [installation guide](https://docs.n8n.io/integrations/community-nodes
 
 ## Credentials
 
-_If users need to authenticate with the app/service, provide details here. You should include prerequisites (such as signing up with the service), available authentication methods, and how to set them up._
-
 - You need an API Key for this integration to work
-- You can get an API Key by signing up on [Orshot](https://orshot.com)
+- You can get an free API Key by signing up on [Orshot](https://orshot.com)
 - After signing up, you can head to your Workspace > Settings > API Key to get your API Key
 - You can use that API Key in the "Token" field in the n8n Integration
 
