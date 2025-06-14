@@ -1,25 +1,57 @@
-## Local setup
+# n8n-nodes-orshot
 
-Install n8n locally. (https://docs.n8n.io/integrations/creating-nodes/test/run-node-locally/)
+This is an n8n community node. It lets you use [Orshot](https://orshot.com)'s Image Generation API in your n8n workflows.
 
-### Build the node
+Orshot is an Image Generation API which lets you generate dynamic images from pre-designed and AI generated templates via API and Integrations.
 
-`npm run build`
+[n8n](https://n8n.io/) is a [fair-code licensed](https://docs.n8n.io/reference/license/) workflow automation platform.
 
-`npm link`
+[Installation](#installation)  
+[Operations](#operations)  
+[Credentials](#credentials) <!-- delete if no auth needed -->  
+[Compatibility](#compatibility)  
+[Usage](#usage) <!-- delete if not using this section -->  
+[Resources](#resources)  
+[Version history](#version-history) <!-- delete if not using this section -->
 
-### Adding Orshot node to your local n8n installation
+## Installation
 
-navigate to `~/.n8n/custom`.
+Follow the [installation guide](https://docs.n8n.io/integrations/community-nodes/installation/) in the n8n community nodes documentation.
 
-If `custom` directory doesn't exist create it and run `npm init` (Use all default values when prompted)
+## Operations
 
-Run this command in `~/.n8n/custom` directory
+- Render images from a library template
+- Render images from a custom studio templates
 
-`npm link n8n-nodes-orshot`
+## Credentials
 
-### Run local n8n
+_If users need to authenticate with the app/service, provide details here. You should include prerequisites (such as signing up with the service), available authentication methods, and how to set them up._
 
-Start your local n8n instance `n8n start`
+- You need an API Key for this integration to work
+- You can get an API Key by signing up on [Orshot](https://orshot.com)
+- After signing up, you can head to your Workspace > Settings > API Key to get your API Key
+- You can use that API Key in the "Token" field in the n8n Integration
 
-You should be able to see orshot node
+## Compatibility
+
+- Works on n8n > 1.00
+- Created on n8n v1.94.1
+
+## Usage
+
+You can refer to [Orshot API Docs](https://orshot.com/docs) to refer to the APIs and their usage along with definitions, examples etc.
+
+## Resources
+
+- [API Docs](https://orshot.com/docs)
+- [Library Templates](https://orshot.com/templates)
+- [Creating a custom API template using Orshot Studio](https://orshot.com/features/orshot-studio)
+- [Creating a template using AI Template Generator](https://orshot.com/features/ai-template-generator)
+- [Integrations](https://orshot.com/integrations)
+
+## Version history
+
+#### 0.1.0
+
+- Initial Release
+- Actions for rendering from a library and studio template
