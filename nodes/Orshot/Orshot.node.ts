@@ -36,7 +36,7 @@ export class Orshot implements INodeType {
 		usableAsTool: true,
 		credentials: [
 			{
-				name: 'orshot',
+				name: 'orshotApi',
 				required: true,
 			},
 		],
@@ -44,21 +44,49 @@ export class Orshot implements INodeType {
 			{
 				displayName: 'API Endpoint',
 				name: 'apiEndpoint',
-				type: 'string',
+				type: 'options',
 				default: 'https://api.orshot.com/v1/generate/images',
+        options: [{
+          name: 'api.orshot.com/v1/generate/images',
+          value: 'https://api.orshot.com/v1/generate/images',
+          description: 'Generate images from a libray template',
+        },
+        {
+          name: 'api.orshot.com/v1/studio/render',
+          value: 'https://api.orshot.com/v1/studio/render',
+          description: 'Generate images from a custom studio template',
+        }],
 				required: true,
-				description: 'The Orshot API endpoint URL',
+				description: 'Orshot API Endpoint URL(ref: https://orshot.com/docs/api-reference)',
 			},
 			{
-				displayName: 'Template',
+				displayName: 'Template Name or ID',
 				name: 'templateId',
 				type: 'options',
 				typeOptions: {
 					loadOptionsMethod: 'getTemplates',
 				},
+        displayOptions: {
+          show: {
+            apiEndpoint: ['https://api.orshot.com/v1/generate/images'],
+          },
+        },
 				default: '',
 				required: true,
-				description: 'Select the template to render',
+				description: 'Select the template to render from. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
+			},
+			{
+				displayName: 'Template ID',
+				name: 'templateId',
+				type: 'string',
+        displayOptions: {
+          show: {
+            apiEndpoint: ['https://api.orshot.com/v1/studio/render'],
+          },
+        },
+				default: '',
+				required: true,
+				description: 'Enter the ID of the studio template to render. You can find this on the template playground page.',
 			},
 			{
 				displayName: 'Response Type',
@@ -80,37 +108,37 @@ export class Orshot implements INodeType {
 				],
 				default: 'base64',
 				required: true,
-				description: 'The format of the response',
+				description: 'Type of response to return',
 			},
 			{
 				displayName: 'Response Format',
 				name: 'responseFormat',
 				type: 'options',
 				options: [
-					{
-						name: 'PNG',
-						value: 'png',
-					},
-					{
-						name: 'JPG',
-						value: 'jpg',
-					},
-					{
-						name: 'JPEG',
-						value: 'jpeg',
-					},
-					{
-						name: 'WebP',
-						value: 'webp',
-					},
-					{
-						name: 'PDF',
-						value: 'pdf',
-					},
-				],
+          {
+            name: 'JPEG',
+            value: 'jpeg',
+          },
+          {
+            name: 'JPG',
+            value: 'jpg',
+          },
+          {
+            name: 'PDF',
+            value: 'pdf',
+          },
+          {
+            name: 'PNG',
+            value: 'png',
+          },
+          {
+            name: 'WebP',
+            value: 'webp',
+          },
+        ],
 				default: 'png',
 				required: true,
-				description: 'The format of the rendered image',
+				description: 'Format of the rendered image',
 			},
 			{
 				displayName: 'Modifications',
@@ -118,11 +146,11 @@ export class Orshot implements INodeType {
 				type: 'fixedCollection',
 				placeholder: 'Add Modification',
 				default: {},
-				displayOptions: {
-					hide: {
-						templateId: [''],
-					},
-				},
+        displayOptions: {
+          show: {
+            apiEndpoint: ['https://api.orshot.com/v1/generate/images'],
+          },
+        },
 				typeOptions: {
 					multipleValues: true,
 				},
@@ -132,14 +160,55 @@ export class Orshot implements INodeType {
 						name: 'modification',
 						values: [
 							{
-								displayName: 'Key',
+								displayName: 'Key Name or ID',
 								name: 'key',
 								type: 'options',
 								typeOptions: {
-									loadOptionsMethod: 'getTemplateModifications',
+									loadOptionsMethod: 'getLibraryTemplateModifications',
 								},
 								default: '',
-								description: 'Select the modification to apply',
+								description: 'Select the modification to apply. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
+							},
+							{
+								displayName: 'Value',
+								name: 'value',
+								type: 'string',
+								default: '',
+								description: 'Enter the value for this modification',
+							},
+						],
+					},
+				],
+				description: 'Template modifications to apply. Select a modification key and enter its value.',
+			},
+			{
+				displayName: 'Modifications',
+				name: 'modifications',
+				type: 'fixedCollection',
+				placeholder: 'Add Modification',
+				default: {},
+        displayOptions: {
+          show: {
+            apiEndpoint: ['https://api.orshot.com/v1/studio/render'],
+          },
+        },
+				typeOptions: {
+					multipleValues: true,
+				},
+				options: [
+					{
+						displayName: 'Modification',
+						name: 'modification',
+						values: [
+							{
+								displayName: 'Key Name or ID',
+								name: 'key',
+								type: 'options',
+								typeOptions: {
+									loadOptionsMethod: 'getStudioTemplateModifications',
+								},
+								default: '',
+								description: 'Select the modification to apply. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
 							},
 							{
 								displayName: 'Value',
@@ -160,7 +229,7 @@ export class Orshot implements INodeType {
 		loadOptions: {
 			async getTemplates(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
 				try {
-					const credentials = await this.getCredentials('orshot');
+					const credentials = await this.getCredentials('orshotApi');
 					const apiKey = credentials.token as string;
 
 					const response = await this.helpers.httpRequest({
@@ -182,14 +251,14 @@ export class Orshot implements INodeType {
 					throw new NodeOperationError(this.getNode(), `Failed to load templates: ${error.message}`);
 				}
 			},
-			async getTemplateModifications(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+			async getLibraryTemplateModifications(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
 				try {
 					const templateId = this.getCurrentNodeParameter('templateId') as string;
 					if (!templateId) {
 						return [];
 					}
 
-					const credentials = await this.getCredentials('orshot');
+					const credentials = await this.getCredentials('orshotApi');
 					const apiKey = credentials.token as string;
 
 					// First try to get template details from the templates endpoint
@@ -236,6 +305,39 @@ export class Orshot implements INodeType {
 					}];
 				}
 			},
+			async getStudioTemplateModifications(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+				try {
+					const templateId = this.getCurrentNodeParameter('templateId') as string;
+					if (!templateId) {
+						return [];
+					}
+
+					const credentials = await this.getCredentials('orshotApi');
+					const apiKey = credentials.token as string;
+
+					const response = await this.helpers.httpRequest({
+						method: 'GET',
+						url: `https://api.orshot.com/v1/studio/template/modifications?templateId=${templateId}`,
+						headers: {
+							'Authorization': `Bearer ${apiKey}`,
+							'Content-Type': 'application/json',
+						},
+					});
+
+					const modifications = Array.isArray(response) ? response : [];
+					
+					return modifications.map((modification: any) => ({
+						name: modification.description || modification.id,
+						value: modification.id,
+					}));
+				} catch (error) {
+					// Return empty array instead of throwing error to avoid breaking the UI
+					return [{
+						name: `Error: ${error.message}`,
+						value: 'error',
+					}];
+				}
+			},
 		},
 	};
 
@@ -245,7 +347,7 @@ export class Orshot implements INodeType {
 
 		for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
 			try {
-				const credentials = await this.getCredentials('orshot');
+				const credentials = await this.getCredentials('orshotApi');
 				const apiKey = credentials.token as string;
 				const apiEndpoint = this.getNodeParameter('apiEndpoint', itemIndex, '') as string;
 				const templateId = this.getNodeParameter('templateId', itemIndex, '') as string;
