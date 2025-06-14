@@ -49,6 +49,10 @@ You can refer to [Orshot API Docs](https://orshot.com/docs) to refer to the APIs
 
 ## Version history
 
+#### 0.2.0
+
+- Make repo public and trigger vertification check
+
 #### 0.1.0
 
 - Initial Release
