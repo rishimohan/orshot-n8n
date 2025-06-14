@@ -35,7 +35,7 @@
 	"n8n": {
 		"n8nNodesApiVersion": 1,
 		"credentials": [
-			"dist/credentials/Orshot.credentials.js"
+			"dist/credentials/OrshotApi.credentials.js"
 		],
 		"nodes": [
 			"dist/nodes/Orshot/Orshot.node.js"

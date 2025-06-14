@@ -36,7 +36,7 @@ export class Orshot implements INodeType {
 		usableAsTool: true,
 		credentials: [
 			{
-				name: 'orshot',
+				name: 'orshotApi',
 				required: true,
 			},
 		],
@@ -60,7 +60,7 @@ export class Orshot implements INodeType {
 				description: 'Orshot API Endpoint URL(ref: https://orshot.com/docs/api-reference)',
 			},
 			{
-				displayName: 'Template',
+				displayName: 'Template Name or ID',
 				name: 'templateId',
 				type: 'options',
 				typeOptions: {
@@ -73,7 +73,7 @@ export class Orshot implements INodeType {
         },
 				default: '',
 				required: true,
-				description: 'Select the template to render from',
+				description: 'Select the template to render from. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
 			},
 			{
 				displayName: 'Template ID',
@@ -86,7 +86,7 @@ export class Orshot implements INodeType {
         },
 				default: '',
 				required: true,
-				description: 'Enter the ID of the studio template to render. You can find this on the template playground page',
+				description: 'Enter the ID of the studio template to render. You can find this on the template playground page.',
 			},
 			{
 				displayName: 'Response Type',
@@ -115,27 +115,27 @@ export class Orshot implements INodeType {
 				name: 'responseFormat',
 				type: 'options',
 				options: [
-					{
-						name: 'PNG',
-						value: 'png',
-					},
-					{
-						name: 'JPG',
-						value: 'jpg',
-					},
-					{
-						name: 'JPEG',
-						value: 'jpeg',
-					},
-					{
-						name: 'WebP',
-						value: 'webp',
-					},
-					{
-						name: 'PDF',
-						value: 'pdf',
-					},
-				],
+          {
+            name: 'JPEG',
+            value: 'jpeg',
+          },
+          {
+            name: 'JPG',
+            value: 'jpg',
+          },
+          {
+            name: 'PDF',
+            value: 'pdf',
+          },
+          {
+            name: 'PNG',
+            value: 'png',
+          },
+          {
+            name: 'WebP',
+            value: 'webp',
+          },
+        ],
 				default: 'png',
 				required: true,
 				description: 'Format of the rendered image',
@@ -146,7 +146,7 @@ export class Orshot implements INodeType {
 				type: 'fixedCollection',
 				placeholder: 'Add Modification',
 				default: {},
-			  displayOptions: {
+        displayOptions: {
           show: {
             apiEndpoint: ['https://api.orshot.com/v1/generate/images'],
           },
@@ -160,14 +160,14 @@ export class Orshot implements INodeType {
 						name: 'modification',
 						values: [
 							{
-								displayName: 'Key',
+								displayName: 'Key Name or ID',
 								name: 'key',
 								type: 'options',
 								typeOptions: {
 									loadOptionsMethod: 'getLibraryTemplateModifications',
 								},
 								default: '',
-								description: 'Select the modification to apply',
+								description: 'Select the modification to apply. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
 							},
 							{
 								displayName: 'Value',
@@ -201,14 +201,14 @@ export class Orshot implements INodeType {
 						name: 'modification',
 						values: [
 							{
-								displayName: 'Key',
+								displayName: 'Key Name or ID',
 								name: 'key',
 								type: 'options',
 								typeOptions: {
 									loadOptionsMethod: 'getStudioTemplateModifications',
 								},
 								default: '',
-								description: 'Select the modification to apply',
+								description: 'Select the modification to apply. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
 							},
 							{
 								displayName: 'Value',
@@ -229,7 +229,7 @@ export class Orshot implements INodeType {
 		loadOptions: {
 			async getTemplates(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
 				try {
-					const credentials = await this.getCredentials('orshot');
+					const credentials = await this.getCredentials('orshotApi');
 					const apiKey = credentials.token as string;
 
 					const response = await this.helpers.httpRequest({
@@ -258,7 +258,7 @@ export class Orshot implements INodeType {
 						return [];
 					}
 
-					const credentials = await this.getCredentials('orshot');
+					const credentials = await this.getCredentials('orshotApi');
 					const apiKey = credentials.token as string;
 
 					// First try to get template details from the templates endpoint
@@ -312,7 +312,7 @@ export class Orshot implements INodeType {
 						return [];
 					}
 
-					const credentials = await this.getCredentials('orshot');
+					const credentials = await this.getCredentials('orshotApi');
 					const apiKey = credentials.token as string;
 
 					const response = await this.helpers.httpRequest({
@@ -347,7 +347,7 @@ export class Orshot implements INodeType {
 
 		for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
 			try {
-				const credentials = await this.getCredentials('orshot');
+				const credentials = await this.getCredentials('orshotApi');
 				const apiKey = credentials.token as string;
 				const apiEndpoint = this.getNodeParameter('apiEndpoint', itemIndex, '') as string;
 				const templateId = this.getNodeParameter('templateId', itemIndex, '') as string;

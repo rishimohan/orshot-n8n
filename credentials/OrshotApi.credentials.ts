@@ -5,10 +5,10 @@ import {
 	INodeProperties,
 } from 'n8n-workflow';
 
-export class Orshot implements ICredentialType {
-	name = 'orshot';
-	displayName = 'Orshot';
-	documentationUrl = 'https://your-docs-url';
+export class OrshotApi implements ICredentialType {
+	name = 'orshotApi';
+	displayName = 'Orshot API';
+	documentationUrl = 'https://orshot.com/docs';
 	properties: INodeProperties[] = [
 		{
 			displayName: 'Token',
