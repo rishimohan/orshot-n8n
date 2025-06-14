@@ -44,10 +44,20 @@ export class Orshot implements INodeType {
 			{
 				displayName: 'API Endpoint',
 				name: 'apiEndpoint',
-				type: 'string',
+				type: 'options',
 				default: 'https://api.orshot.com/v1/generate/images',
+        options: [{
+          name: 'api.orshot.com/v1/generate/images',
+          value: 'https://api.orshot.com/v1/generate/images',
+          description: 'Generate images from a libray template',
+        },
+        {
+          name: 'api.orshot.com/v1/studio/render',
+          value: 'https://api.orshot.com/v1/studio/render',
+          description: 'Generate images from a custom studio template',
+        }],
 				required: true,
-				description: 'The Orshot API endpoint URL',
+				description: 'Orshot API Endpoint URL(ref: https://orshot.com/docs/api-reference)',
 			},
 			{
 				displayName: 'Template',
@@ -56,9 +66,27 @@ export class Orshot implements INodeType {
 				typeOptions: {
 					loadOptionsMethod: 'getTemplates',
 				},
+        displayOptions: {
+          show: {
+            apiEndpoint: ['https://api.orshot.com/v1/generate/images'],
+          },
+        },
 				default: '',
 				required: true,
-				description: 'Select the template to render',
+				description: 'Select the template to render from',
+			},
+			{
+				displayName: 'Template ID',
+				name: 'templateId',
+				type: 'string',
+        displayOptions: {
+          show: {
+            apiEndpoint: ['https://api.orshot.com/v1/studio/render'],
+          },
+        },
+				default: '',
+				required: true,
+				description: 'Enter the ID of the studio template to render. You can find this on the template playground page',
 			},
 			{
 				displayName: 'Response Type',
@@ -80,7 +108,7 @@ export class Orshot implements INodeType {
 				],
 				default: 'base64',
 				required: true,
-				description: 'The format of the response',
+				description: 'Type of response to return',
 			},
 			{
 				displayName: 'Response Format',
@@ -110,7 +138,7 @@ export class Orshot implements INodeType {
 				],
 				default: 'png',
 				required: true,
-				description: 'The format of the rendered image',
+				description: 'Format of the rendered image',
 			},
 			{
 				displayName: 'Modifications',
@@ -118,11 +146,11 @@ export class Orshot implements INodeType {
 				type: 'fixedCollection',
 				placeholder: 'Add Modification',
 				default: {},
-				displayOptions: {
-					hide: {
-						templateId: [''],
-					},
-				},
+			  displayOptions: {
+          show: {
+            apiEndpoint: ['https://api.orshot.com/v1/generate/images'],
+          },
+        },
 				typeOptions: {
 					multipleValues: true,
 				},
@@ -136,7 +164,48 @@ export class Orshot implements INodeType {
 								name: 'key',
 								type: 'options',
 								typeOptions: {
-									loadOptionsMethod: 'getTemplateModifications',
+									loadOptionsMethod: 'getLibraryTemplateModifications',
+								},
+								default: '',
+								description: 'Select the modification to apply',
+							},
+							{
+								displayName: 'Value',
+								name: 'value',
+								type: 'string',
+								default: '',
+								description: 'Enter the value for this modification',
+							},
+						],
+					},
+				],
+				description: 'Template modifications to apply. Select a modification key and enter its value.',
+			},
+			{
+				displayName: 'Modifications',
+				name: 'modifications',
+				type: 'fixedCollection',
+				placeholder: 'Add Modification',
+				default: {},
+        displayOptions: {
+          show: {
+            apiEndpoint: ['https://api.orshot.com/v1/studio/render'],
+          },
+        },
+				typeOptions: {
+					multipleValues: true,
+				},
+				options: [
+					{
+						displayName: 'Modification',
+						name: 'modification',
+						values: [
+							{
+								displayName: 'Key',
+								name: 'key',
+								type: 'options',
+								typeOptions: {
+									loadOptionsMethod: 'getStudioTemplateModifications',
 								},
 								default: '',
 								description: 'Select the modification to apply',
@@ -182,7 +251,7 @@ export class Orshot implements INodeType {
 					throw new NodeOperationError(this.getNode(), `Failed to load templates: ${error.message}`);
 				}
 			},
-			async getTemplateModifications(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+			async getLibraryTemplateModifications(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
 				try {
 					const templateId = this.getCurrentNodeParameter('templateId') as string;
 					if (!templateId) {
@@ -227,6 +296,39 @@ export class Orshot implements INodeType {
 					return modifications.map((modification: any) => ({
 						name: modification.description || modification.key,
 						value: modification.key,
+					}));
+				} catch (error) {
+					// Return empty array instead of throwing error to avoid breaking the UI
+					return [{
+						name: `Error: ${error.message}`,
+						value: 'error',
+					}];
+				}
+			},
+			async getStudioTemplateModifications(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+				try {
+					const templateId = this.getCurrentNodeParameter('templateId') as string;
+					if (!templateId) {
+						return [];
+					}
+
+					const credentials = await this.getCredentials('orshot');
+					const apiKey = credentials.token as string;
+
+					const response = await this.helpers.httpRequest({
+						method: 'GET',
+						url: `https://api.orshot.com/v1/studio/template/modifications?templateId=${templateId}`,
+						headers: {
+							'Authorization': `Bearer ${apiKey}`,
+							'Content-Type': 'application/json',
+						},
+					});
+
+					const modifications = Array.isArray(response) ? response : [];
+					
+					return modifications.map((modification: any) => ({
+						name: modification.description || modification.id,
+						value: modification.id,
 					}));
 				} catch (error) {
 					// Return empty array instead of throwing error to avoid breaking the UI
