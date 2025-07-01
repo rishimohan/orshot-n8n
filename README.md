@@ -20,8 +20,8 @@ Follow the [installation guide](https://docs.n8n.io/integrations/community-nodes
 
 ## Operations
 
-- Render images from a library template
-- Render images from a custom studio templates
+- Generate Images from a Library Template
+- Generate Images from a Orshot Studio Templates
 
 ## Credentials
 
