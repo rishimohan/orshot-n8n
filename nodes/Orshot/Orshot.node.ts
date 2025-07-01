@@ -52,7 +52,7 @@ export class Orshot implements INodeType {
           description: 'https://api.orshot.com/v1/generate/images',
         },
         {
-          name: 'Generate Image from a Orshot Studio Template',
+          name: 'Generate Image from an Orshot Studio Template',
           value: 'https://api.orshot.com/v1/studio/render',
           description: 'https://api.orshot.com/v1/studio/render',
         }],
@@ -226,118 +226,104 @@ export class Orshot implements INodeType {
 	};
 
 	methods = {
-		loadOptions: {
-			async getTemplates(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
-				try {
-					const credentials = await this.getCredentials('orshotApi');
-					const apiKey = credentials.token as string;
+			loadOptions: {
+				async getTemplates(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+					try {
+						const response = await this.helpers.httpRequestWithAuthentication.call(this, 'orshotApi', {
+							method: 'GET',
+							url: 'https://api.orshot.com/v1/templates',
+							headers: {
+								'Content-Type': 'application/json',
+							},
+						});
 
-					const response = await this.helpers.httpRequest({
-						method: 'GET',
-						url: 'https://api.orshot.com/v1/templates',
-						headers: {
-							'Authorization': `Bearer ${apiKey}`,
-							'Content-Type': 'application/json',
-						},
-					});
-
-					const templates = Array.isArray(response) ? response : [];
-					
-					return templates.map((template: any) => ({
-						name: `${template.title} - ${template.description}`,
-						value: template.id,
-					}));
-				} catch (error) {
-					throw new NodeOperationError(this.getNode(), `Failed to load templates: ${error.message}`);
-				}
-			},
-			async getLibraryTemplateModifications(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
-				try {
-					const templateId = this.getCurrentNodeParameter('templateId') as string;
-					if (!templateId) {
-						return [];
+						const templates = Array.isArray(response) ? response : [];
+						
+						return templates.map((template: any) => ({
+							name: `${template.title} - ${template.description}`,
+							value: template.id,
+						}));
+					} catch (error) {
+						throw new NodeOperationError(this.getNode(), `Failed to load templates: ${error.message}`);
 					}
+				},
+				async getLibraryTemplateModifications(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+					try {
+						const templateId = this.getCurrentNodeParameter('templateId') as string;
+						if (!templateId) {
+							return [];
+						}
 
-					const credentials = await this.getCredentials('orshotApi');
-					const apiKey = credentials.token as string;
+						// First try to get template details from the templates endpoint
+						const templatesResponse = await this.helpers.httpRequestWithAuthentication.call(this, 'orshotApi', {
+							method: 'GET',
+							url: 'https://api.orshot.com/v1/templates',
+							headers: {
+								'Content-Type': 'application/json',
+							},
+						});
 
-					// First try to get template details from the templates endpoint
-					const templatesResponse = await this.helpers.httpRequest({
-						method: 'GET',
-						url: 'https://api.orshot.com/v1/templates',
-						headers: {
-							'Authorization': `Bearer ${apiKey}`,
-							'Content-Type': 'application/json',
-						},
-					});
+						const templates = Array.isArray(templatesResponse) ? templatesResponse : [];
+						const selectedTemplate = templates.find((template: any) => template.id === templateId);
 
-					const templates = Array.isArray(templatesResponse) ? templatesResponse : [];
-					const selectedTemplate = templates.find((template: any) => template.id === templateId);
+						if (selectedTemplate && selectedTemplate.modifications) {
+							return selectedTemplate.modifications.map((modification: any) => ({
+								name: modification.description || modification.key,
+								value: modification.key,
+							}));
+						}
 
-					if (selectedTemplate && selectedTemplate.modifications) {
-						return selectedTemplate.modifications.map((modification: any) => ({
+						// Fallback to modifications endpoint if template doesn't have modifications
+						const response = await this.helpers.httpRequestWithAuthentication.call(this, 'orshotApi', {
+							method: 'GET',
+							url: `https://api.orshot.com/v1/templates/modifications?template_id=${templateId}`,
+							headers: {
+								'Content-Type': 'application/json',
+							},
+						});
+
+						const modifications = Array.isArray(response) ? response : [];
+						
+						return modifications.map((modification: any) => ({
 							name: modification.description || modification.key,
 							value: modification.key,
 						}));
+					} catch (error) {
+						// Return empty array instead of throwing error to avoid breaking the UI
+						return [{
+							name: `Error: ${error.message}`,
+							value: 'error',
+						}];
 					}
+				},				async getStudioTemplateModifications(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+					try {
+						const templateId = this.getCurrentNodeParameter('templateId') as string;
+						if (!templateId) {
+							return [];
+						}
 
-					// Fallback to modifications endpoint if template doesn't have modifications
-					const response = await this.helpers.httpRequest({
-						method: 'GET',
-						url: `https://api.orshot.com/v1/templates/modifications?template_id=${templateId}`,
-						headers: {
-							'Authorization': `Bearer ${apiKey}`,
-							'Content-Type': 'application/json',
-						},
-					});
+						const response = await this.helpers.httpRequestWithAuthentication.call(this, 'orshotApi', {
+							method: 'GET',
+							url: `https://api.orshot.com/v1/studio/template/modifications?templateId=${templateId}`,
+							headers: {
+								'Content-Type': 'application/json',
+							},
+						});
 
-					const modifications = Array.isArray(response) ? response : [];
-					
-					return modifications.map((modification: any) => ({
-						name: modification.description || modification.key,
-						value: modification.key,
-					}));
-				} catch (error) {
-					// Return empty array instead of throwing error to avoid breaking the UI
-					return [{
-						name: `Error: ${error.message}`,
-						value: 'error',
-					}];
-				}
-			},
-			async getStudioTemplateModifications(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
-				try {
-					const templateId = this.getCurrentNodeParameter('templateId') as string;
-					if (!templateId) {
-						return [];
+						const modifications = Array.isArray(response) ? response : [];
+						
+						return modifications.map((modification: any) => ({
+							name: modification.description || modification.id,
+							value: modification.id,
+						}));
+					} catch (error) {
+						// Return empty array instead of throwing error to avoid breaking the UI
+						return [{
+							name: `Error: ${error.message}`,
+							value: 'error',
+						}];
 					}
-
-					const credentials = await this.getCredentials('orshotApi');
-					const apiKey = credentials.token as string;
-
-					const response = await this.helpers.httpRequest({
-						method: 'GET',
-						url: `https://api.orshot.com/v1/studio/template/modifications?templateId=${templateId}`,
-						headers: {
-							'Authorization': `Bearer ${apiKey}`,
-							'Content-Type': 'application/json',
-						},
-					});
-
-					const modifications = Array.isArray(response) ? response : [];
-					
-					return modifications.map((modification: any) => ({
-						name: modification.description || modification.id,
-						value: modification.id,
-					}));
-				} catch (error) {
-					// Return empty array instead of throwing error to avoid breaking the UI
-					return [{
-						name: `Error: ${error.message}`,
-						value: 'error',
-					}];
-				}
-			},
+				},
 		},
 	};
 
@@ -347,8 +333,6 @@ export class Orshot implements INodeType {
 
 		for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
 			try {
-				const credentials = await this.getCredentials('orshotApi');
-				const apiKey = credentials.token as string;
 				const operation = this.getNodeParameter('operation', itemIndex, '') as string;
 				const templateId = this.getNodeParameter('templateId', itemIndex, '') as string;
 				const responseType = this.getNodeParameter('responseType', itemIndex, '') as string;
@@ -376,18 +360,37 @@ export class Orshot implements INodeType {
 					},
 				};
 
-				// Make the API request
-				const response = await this.helpers.httpRequest({
+				// Make the API request with authentication
+				const response = await this.helpers.httpRequestWithAuthentication.call(this, 'orshotApi', {
 					method: 'POST',
 					url: operation,
 					headers: {
-						'Authorization': `Bearer ${apiKey}`,
 						'Content-Type': 'application/json',
 					},
 					body: requestBody,
 					returnFullResponse: true,
 					encoding: responseType === 'binary' ? 'arraybuffer' : 'text',
 				});
+
+				// Check for successful response
+				if (response.statusCode < 200 || response.statusCode >= 300) {
+					let errorMessage = `API request failed with status ${response.statusCode}`;
+					
+					// Try to extract error message from response body
+					try {
+						const errorBody = typeof response.body === 'string' ? JSON.parse(response.body) : response.body;
+						if (errorBody && errorBody.error) {
+							errorMessage += `: ${errorBody.error}`;
+						} else if (errorBody && errorBody.message) {
+							errorMessage += `: ${errorBody.message}`;
+						}
+					} catch {
+						// If we can't parse the error body, just use the status code
+						errorMessage += `: ${response.body || 'Unknown error'}`;
+					}
+					
+					throw new NodeOperationError(this.getNode(), errorMessage, { itemIndex });
+				}
 
 				let outputData: any = {
 					templateId,
@@ -404,11 +407,38 @@ export class Orshot implements INodeType {
 						outputData.mimeType = getMimeType(responseFormat);
 						break;
 					case 'binary':
-						outputData.data = Buffer.from(response.body as ArrayBuffer);
-						outputData.mimeType = getMimeType(responseFormat);
-						break;
+						// Use prepareBinaryData for proper binary handling
+						const binaryData = await this.helpers.prepareBinaryData(
+							Buffer.from(response.body as ArrayBuffer),
+							`orshot-image.${responseFormat}`,
+							getMimeType(responseFormat)
+						);
+						
+						returnData.push({
+							json: {
+								templateId,
+								responseType,
+								responseFormat,
+								statusCode: response.statusCode,
+								modifications: modifications,
+							},
+							binary: {
+								data: binaryData,
+							},
+							pairedItem: itemIndex,
+						});
+						continue; // Skip the regular returnData.push below
 					case 'url':
-						outputData.data = response.body;
+						// For URL response, parse the JSON if it's a string
+						let urlData = response.body;
+						if (typeof response.body === 'string') {
+							try {
+								urlData = JSON.parse(response.body);
+							} catch {
+								// If parsing fails, keep as string
+							}
+						}
+						outputData.data = urlData;
 						break;
 					default:
 						outputData.data = response.body;
@@ -420,11 +450,44 @@ export class Orshot implements INodeType {
 				});
 
 			} catch (error) {
+				// Enhanced error handling
+				let errorMessage = error.message || 'Unknown error occurred';
+				let errorDetails: any = {
+					templateId: this.getNodeParameter('templateId', itemIndex, '') as string,
+					operation: this.getNodeParameter('operation', itemIndex, '') as string,
+					timestamp: new Date().toISOString(),
+				};
+
+				// Add more context if available
+				if (error.response) {
+					errorDetails.httpStatus = error.response.status;
+					errorDetails.httpStatusText = error.response.statusText;
+					
+					// Try to extract API error details
+					if (error.response.data) {
+						try {
+							const errorData = typeof error.response.data === 'string' 
+								? JSON.parse(error.response.data) 
+								: error.response.data;
+							
+							if (errorData.error) {
+								errorMessage = errorData.error;
+							} else if (errorData.message) {
+								errorMessage = errorData.message;
+							}
+							
+							errorDetails.apiError = errorData;
+						} catch {
+							errorDetails.rawResponse = error.response.data;
+						}
+					}
+				}
+
 				if (this.continueOnFail()) {
 					returnData.push({
 						json: { 
-							error: error.message,
-							templateId: this.getNodeParameter('templateId', itemIndex, '') as string,
+							error: errorMessage,
+							errorDetails,
 						},
 						pairedItem: itemIndex,
 					});
@@ -433,8 +496,9 @@ export class Orshot implements INodeType {
 						error.context.itemIndex = itemIndex;
 						throw error;
 					}
-					throw new NodeOperationError(this.getNode(), error, {
+					throw new NodeOperationError(this.getNode(), errorMessage, {
 						itemIndex,
+						description: errorDetails,
 					});
 				}
 			}
