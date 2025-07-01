@@ -42,19 +42,19 @@ export class Orshot implements INodeType {
 		],
 		properties: [
 			{
-				displayName: 'API Endpoint',
-				name: 'apiEndpoint',
+				displayName: 'Operation',
+				name: 'operation',
 				type: 'options',
 				default: 'https://api.orshot.com/v1/generate/images',
         options: [{
-          name: 'api.orshot.com/v1/generate/images',
+          name: 'Generate Image from a Library Template',
           value: 'https://api.orshot.com/v1/generate/images',
-          description: 'Generate images from a libray template',
+          description: 'https://api.orshot.com/v1/generate/images',
         },
         {
-          name: 'api.orshot.com/v1/studio/render',
+          name: 'Generate Image from a Orshot Studio Template',
           value: 'https://api.orshot.com/v1/studio/render',
-          description: 'Generate images from a custom studio template',
+          description: 'https://api.orshot.com/v1/studio/render',
         }],
 				required: true,
 				description: 'Orshot API Endpoint URL(ref: https://orshot.com/docs/api-reference)',
@@ -68,7 +68,7 @@ export class Orshot implements INodeType {
 				},
         displayOptions: {
           show: {
-            apiEndpoint: ['https://api.orshot.com/v1/generate/images'],
+            operation: ['https://api.orshot.com/v1/generate/images'],
           },
         },
 				default: '',
@@ -81,7 +81,7 @@ export class Orshot implements INodeType {
 				type: 'string',
         displayOptions: {
           show: {
-            apiEndpoint: ['https://api.orshot.com/v1/studio/render'],
+            operation: ['https://api.orshot.com/v1/studio/render'],
           },
         },
 				default: '',
@@ -148,7 +148,7 @@ export class Orshot implements INodeType {
 				default: {},
         displayOptions: {
           show: {
-            apiEndpoint: ['https://api.orshot.com/v1/generate/images'],
+            operation: ['https://api.orshot.com/v1/generate/images'],
           },
         },
 				typeOptions: {
@@ -189,7 +189,7 @@ export class Orshot implements INodeType {
 				default: {},
         displayOptions: {
           show: {
-            apiEndpoint: ['https://api.orshot.com/v1/studio/render'],
+            operation: ['https://api.orshot.com/v1/studio/render'],
           },
         },
 				typeOptions: {
@@ -349,7 +349,7 @@ export class Orshot implements INodeType {
 			try {
 				const credentials = await this.getCredentials('orshotApi');
 				const apiKey = credentials.token as string;
-				const apiEndpoint = this.getNodeParameter('apiEndpoint', itemIndex, '') as string;
+				const operation = this.getNodeParameter('operation', itemIndex, '') as string;
 				const templateId = this.getNodeParameter('templateId', itemIndex, '') as string;
 				const responseType = this.getNodeParameter('responseType', itemIndex, '') as string;
 				const responseFormat = this.getNodeParameter('responseFormat', itemIndex, '') as string;
@@ -379,7 +379,7 @@ export class Orshot implements INodeType {
 				// Make the API request
 				const response = await this.helpers.httpRequest({
 					method: 'POST',
-					url: apiEndpoint,
+					url: operation,
 					headers: {
 						'Authorization': `Bearer ${apiKey}`,
 						'Content-Type': 'application/json',
