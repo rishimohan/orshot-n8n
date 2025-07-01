@@ -1,6 +1,6 @@
 {
 	"name": "@thelifeofrishi/n8n-nodes-orshot",
-	"version": "0.2.0",
+	"version": "0.2.1",
 	"description": "Orshot n8n Node",
 	"homepage": "https://orshot.com",
 	"keywords": [
