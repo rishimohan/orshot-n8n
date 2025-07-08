@@ -49,6 +49,10 @@ You can refer to [Orshot API Docs](https://orshot.com/docs) to refer to the APIs
 
 ## Version history
 
+#### 0.2.5
+
+- Automatically show dropdown of user's studio templates(previously user needed to enter it manually)
+
 #### 0.2.0
 
 - Make repo public and trigger vertification check
