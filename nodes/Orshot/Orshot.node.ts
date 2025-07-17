@@ -26,8 +26,9 @@ export class Orshot implements INodeType {
 		name: 'orshot',
 		group: ['transform'],
 		icon: 'file:orshot.svg',
-		version: 1,
-		description: 'Automated Image Generation from pre-designed and AI generated templates',
+    documentationUrl: 'https://el.orshot.com/n8n-docs',
+		version: 2,
+		description: 'Automated Image Generation for Marketing',
 		defaults: {
 			name: 'Orshot',
 		},
@@ -272,6 +273,7 @@ export class Orshot implements INodeType {
 						return templates.map((template: any) => ({
 							name: `${template.name}`,
 							value: template.id,
+              description: template?.description || '',
 						}));
 					} catch (error) {
 						throw new NodeOperationError(this.getNode(), `Failed to load studio templates: ${error.message}`);

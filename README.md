@@ -49,6 +49,11 @@ You can refer to [Orshot API Docs](https://orshot.com/docs) to refer to the APIs
 
 ## Version history
 
+#### 0.3
+
+- Add correct link to n8n Ingegration doc
+- Show descriptions in studio templates dropdown list
+
 #### 0.2.5
 
 - Automatically show dropdown of user's studio templates(previously user needed to enter it manually)
