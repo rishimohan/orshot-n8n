@@ -7,7 +7,6 @@ import type {
 	INodeTypeDescription,
 } from 'n8n-workflow';
 import { NodeConnectionType, NodeOperationError } from 'n8n-workflow';
-import { Buffer } from 'buffer';
 
 const getMimeType = (format: string): string => {
 	const mimeTypes: { [key: string]: string } = {
@@ -27,7 +26,7 @@ export class Orshot implements INodeType {
 		group: ['transform'],
 		icon: 'file:orshot.svg',
     documentationUrl: 'https://el.orshot.com/n8n-docs',
-		version: 2,
+		version: 3,
 		description: 'Automated Image Generation for Marketing',
 		defaults: {
 			name: 'Orshot',
@@ -456,7 +455,7 @@ export class Orshot implements INodeType {
 					case 'binary':
 						// Use prepareBinaryData for proper binary handling
 						const binaryData = await this.helpers.prepareBinaryData(
-							Buffer.from(response.body as ArrayBuffer),
+							response.body as ArrayBuffer,
 							`orshot-image.${responseFormat}`,
 							getMimeType(responseFormat)
 						);
