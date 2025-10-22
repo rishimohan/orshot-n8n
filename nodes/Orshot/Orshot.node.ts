@@ -147,6 +147,36 @@ export class Orshot implements INodeType {
 				description: 'Format of the rendered image',
 			},
 			{
+				displayName: 'Custom File Name',
+				name: 'customFileName',
+				type: 'string',
+				displayOptions: {
+					show: {
+						operation: ['https://api.orshot.com/v1/studio/render'],
+						responseType: ['url', 'binary'],
+					},
+				},
+				default: '',
+				description: 'Custom file name for the output file (without extension). Works only with URL or Binary response types.',
+			},
+			{
+				displayName: 'Scale',
+				name: 'scale',
+				type: 'number',
+				displayOptions: {
+					show: {
+						operation: ['https://api.orshot.com/v1/studio/render'],
+					},
+				},
+				default: 1,
+				typeOptions: {
+					minValue: 0.1,
+					maxValue: 10,
+					numberPrecision: 1,
+				},
+				description: 'Scale factor for the rendered output (0.1 to 10)',
+			},
+			{
 				displayName: 'Modifications',
 				name: 'libraryModifications',
 				type: 'fixedCollection',
@@ -396,7 +426,7 @@ export class Orshot implements INodeType {
 				}
 
 				// Prepare the request body
-				const requestBody = {
+				const requestBody: any = {
 					templateId,
 					modifications,
 					source: 'n8n-integration',
@@ -405,6 +435,20 @@ export class Orshot implements INodeType {
 						type: responseType,
 					},
 				};
+
+				// Add studio-specific parameters
+				if (operation === 'https://api.orshot.com/v1/studio/render') {
+					const customFileName = this.getNodeParameter('customFileName', itemIndex, '') as string;
+					const scale = this.getNodeParameter('scale', itemIndex, 1) as number;
+
+					if (customFileName && (responseType === 'url' || responseType === 'binary')) {
+						requestBody.response.fileName = customFileName;
+					}
+
+					if (scale && scale !== 1) {
+						requestBody.response.scale = scale;
+					}
+				}
 
 				// Make the API request with authentication
 				const response = await this.helpers.httpRequestWithAuthentication.call(this, 'orshotApi', {
