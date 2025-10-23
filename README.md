@@ -49,6 +49,10 @@ You can refer to [Orshot API Docs](https://orshot.com/docs) to refer to the APIs
 
 ## Version history
 
+#### 0.4.1
+
+- Added support for `includePages` param for studio templates
+
 #### 0.4.0
 
 - Added support for `customFileName` and `scale` params for studio templates

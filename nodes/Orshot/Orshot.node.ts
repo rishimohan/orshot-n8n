@@ -163,11 +163,6 @@ export class Orshot implements INodeType {
 				displayName: 'Scale',
 				name: 'scale',
 				type: 'number',
-				displayOptions: {
-					show: {
-						operation: ['https://api.orshot.com/v1/studio/render'],
-					},
-				},
 				default: 1,
 				typeOptions: {
 					minValue: 0.1,
@@ -175,6 +170,19 @@ export class Orshot implements INodeType {
 					numberPrecision: 1,
 				},
 				description: 'Scale factor for the rendered output (0.1 to 10)',
+			},
+			{
+				displayName: 'Include Pages',
+				name: 'includePages',
+				type: 'string',
+				displayOptions: {
+					show: {
+						operation: ['https://api.orshot.com/v1/studio/render'],
+					},
+				},
+				default: '',
+				placeholder: '1,3,5',
+				description: 'Comma-separated list of page numbers to include (e.g., "1,3,5" will render pages 1, 3, and 5). Only works for multi-page templates. Leave empty to include all pages.',
 			},
 			{
 				displayName: 'Modifications',
@@ -436,17 +444,33 @@ export class Orshot implements INodeType {
 					},
 				};
 
+				// Add scale parameter (works for both library and studio templates)
+				const scale = this.getNodeParameter('scale', itemIndex, 1) as number;
+				if (scale && scale !== 1) {
+					requestBody.response.scale = scale;
+				}
+
 				// Add studio-specific parameters
 				if (operation === 'https://api.orshot.com/v1/studio/render') {
 					const customFileName = this.getNodeParameter('customFileName', itemIndex, '') as string;
-					const scale = this.getNodeParameter('scale', itemIndex, 1) as number;
+					const includePages = this.getNodeParameter('includePages', itemIndex, '') as string;
 
 					if (customFileName && (responseType === 'url' || responseType === 'binary')) {
 						requestBody.response.fileName = customFileName;
 					}
 
-					if (scale && scale !== 1) {
-						requestBody.response.scale = scale;
+					if (includePages && includePages.trim() !== '') {
+						// Parse comma-separated page numbers
+						const pageNumbers = includePages
+							.split(',')
+							.map(p => p.trim())
+							.filter(p => p !== '')
+							.map(p => parseInt(p, 10))
+							.filter(p => !isNaN(p) && p > 0);
+						
+						if (pageNumbers.length > 0) {
+							requestBody.response.includePages = pageNumbers;
+						}
 					}
 				}
 
