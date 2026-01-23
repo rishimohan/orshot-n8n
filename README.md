@@ -49,6 +49,12 @@ You can refer to [Orshot API Docs](https://orshot.com/docs) to refer to the APIs
 
 ## Version history
 
+#### 0.5.0
+
+- Added support for Video generation (`mp4`, `webm`, `gif`) for studio templates
+- Added support for PDF options (`dpi`, `margin`, `colorMode`, `pageRange`)
+- Added support for Video options (`loop`, `muted`, `trimStart`, `trimEnd`)
+
 #### 0.4.1
 
 - Added support for `includePages` param for studio templates

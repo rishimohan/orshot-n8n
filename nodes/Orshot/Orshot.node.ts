@@ -15,6 +15,9 @@ const getMimeType = (format: string): string => {
 		jpeg: 'image/jpeg',
 		webp: 'image/webp',
 		pdf: 'application/pdf',
+		mp4: 'video/mp4',
+		webm: 'video/webm',
+		gif: 'image/gif',
 	};
 	return mimeTypes[format] || 'application/octet-stream';
 };
@@ -95,6 +98,51 @@ export class Orshot implements INodeType {
 				description: 'Select the studio template to render from. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
 			},
 			{
+				displayName: 'Response Format',
+				name: 'responseFormat',
+				type: 'options',
+				options: [
+          {
+            name: 'GIF',
+            value: 'gif',
+            description: 'Animated GIF (Studio templates only)',
+          },
+          {
+            name: 'JPEG',
+            value: 'jpeg',
+          },
+          {
+            name: 'JPG',
+            value: 'jpg',
+          },
+          {
+            name: 'MP4',
+            value: 'mp4',
+            description: 'Video format (Studio templates only)',
+          },
+          {
+            name: 'PDF',
+            value: 'pdf',
+          },
+          {
+            name: 'PNG',
+            value: 'png',
+          },
+          {
+            name: 'WebM',
+            value: 'webm',
+            description: 'Video format (Studio templates only)',
+          },
+          {
+            name: 'WebP',
+            value: 'webp',
+          },
+        ],
+				default: 'png',
+				required: true,
+				description: 'Format of the rendered image',
+			},
+			{
 				displayName: 'Response Type',
 				name: 'responseType',
 				type: 'options',
@@ -114,75 +162,206 @@ export class Orshot implements INodeType {
 				],
 				default: 'base64',
 				required: true,
+				displayOptions: {
+					hide: {
+						responseFormat: ['mp4', 'webm', 'gif'],
+					},
+				},
 				description: 'Type of response to return',
 			},
 			{
-				displayName: 'Response Format',
-				name: 'responseFormat',
+				displayName: 'Response Type',
+				name: 'responseTypeVideo',
 				type: 'options',
 				options: [
-          {
-            name: 'JPEG',
-            value: 'jpeg',
-          },
-          {
-            name: 'JPG',
-            value: 'jpg',
-          },
-          {
-            name: 'PDF',
-            value: 'pdf',
-          },
-          {
-            name: 'PNG',
-            value: 'png',
-          },
-          {
-            name: 'WebP',
-            value: 'webp',
-          },
-        ],
-				default: 'png',
+					{
+						name: 'URL',
+						value: 'url',
+					},
+				],
+				default: 'url',
 				required: true,
-				description: 'Format of the rendered image',
-			},
-			{
-				displayName: 'Custom File Name',
-				name: 'customFileName',
-				type: 'string',
 				displayOptions: {
 					show: {
-						operation: ['https://api.orshot.com/v1/studio/render'],
-						responseType: ['url', 'binary'],
+						responseFormat: ['mp4', 'webm', 'gif'],
 					},
 				},
-				default: '',
-				description: 'Custom file name for the output file (without extension). Works only with URL or Binary response types.',
+				description: 'Video formats are always returned as a URL',
 			},
 			{
-				displayName: 'Scale',
-				name: 'scale',
-				type: 'number',
-				default: 1,
-				typeOptions: {
-					minValue: 0.1,
-					maxValue: 10,
-					numberPrecision: 1,
-				},
-				description: 'Scale factor for the rendered output (0.1 to 10)',
-			},
-			{
-				displayName: 'Include Pages',
-				name: 'includePages',
-				type: 'string',
-				displayOptions: {
-					show: {
-						operation: ['https://api.orshot.com/v1/studio/render'],
+				displayName: 'Options',
+				name: 'options',
+				type: 'collection',
+				placeholder: 'Add Option',
+				default: {},
+				options: [
+					{
+						displayName: 'Custom File Name',
+						name: 'customFileName',
+						type: 'string',
+						displayOptions: {
+							show: {
+								'/operation': ['https://api.orshot.com/v1/studio/render'],
+								'/responseType': ['url', 'binary'],
+							},
+						},
+						default: '',
+						description: 'Custom file name for the output file (without extension). Works only with URL or Binary response types.',
 					},
-				},
-				default: '',
-				placeholder: '1,3,5',
-				description: 'Comma-separated list of page numbers to include (e.g., "1,3,5" will render pages 1, 3, and 5). Only works for multi-page templates. Leave empty to include all pages.',
+					{
+						displayName: 'Include Pages',
+						name: 'includePages',
+						type: 'string',
+						displayOptions: {
+							show: {
+								'/operation': ['https://api.orshot.com/v1/studio/render'],
+							},
+						},
+						default: '',
+						placeholder: '1,3,5',
+						description: 'Comma-separated list of page numbers to include (e.g., "1,3,5" will render pages 1, 3, and 5). Only works for multi-page templates. Leave empty to include all pages.',
+					},
+					{
+						displayName: 'Loop Video',
+						name: 'videoLoop',
+						type: 'boolean',
+						displayOptions: {
+							show: {
+								'/operation': ['https://api.orshot.com/v1/studio/render'],
+								'/responseFormat': ['mp4', 'webm', 'gif'],
+							},
+						},
+						default: false,
+						description: 'Whether to loop the video',
+					},
+					{
+						displayName: 'Mute Audio',
+						name: 'videoMuted',
+						type: 'boolean',
+						displayOptions: {
+							show: {
+								'/operation': ['https://api.orshot.com/v1/studio/render'],
+								'/responseFormat': ['mp4', 'webm', 'gif'],
+							},
+						},
+						default: false,
+						description: 'Whether to mute the audio in the video',
+					},
+					{
+						displayName: 'Page Range From',
+						name: 'pdfRangeFrom',
+						type: 'number',
+						displayOptions: {
+							show: {
+								'/operation': ['https://api.orshot.com/v1/studio/render'],
+								'/responseFormat': ['pdf'],
+							},
+						},
+						default: 0,
+						description: 'Start page number for PDF export range',
+					},
+					{
+						displayName: 'Page Range To',
+						name: 'pdfRangeTo',
+						type: 'number',
+						displayOptions: {
+							show: {
+								'/operation': ['https://api.orshot.com/v1/studio/render'],
+								'/responseFormat': ['pdf'],
+							},
+						},
+						default: 0,
+						description: 'End page number for PDF export range',
+					},
+					{
+						displayName: 'PDF Color Mode',
+						name: 'pdfColorMode',
+						type: 'options',
+						options: [
+							{
+								name: 'RGB',
+								value: 'rgb',
+							},
+							{
+								name: 'CMYK',
+								value: 'cmyk',
+							},
+						],
+						displayOptions: {
+							show: {
+								'/operation': ['https://api.orshot.com/v1/studio/render'],
+								'/responseFormat': ['pdf'],
+							},
+						},
+						default: 'rgb',
+						description: 'Color mode for the PDF output',
+					},
+					{
+						displayName: 'PDF Margin',
+						name: 'pdfMargin',
+						type: 'string',
+						displayOptions: {
+							show: {
+								'/operation': ['https://api.orshot.com/v1/studio/render'],
+								'/responseFormat': ['pdf'],
+							},
+						},
+						default: '',
+						placeholder: '20px',
+						description: 'Margin for the PDF pages (e.g., "20px", "1in")',
+					},
+					{
+						displayName: 'PDF Quality (DPI)',
+						name: 'pdfDpi',
+						type: 'number',
+						displayOptions: {
+							show: {
+								'/operation': ['https://api.orshot.com/v1/studio/render'],
+								'/responseFormat': ['pdf'],
+							},
+						},
+						default: 72,
+						description: 'DPI for the PDF output (72 is standard, 300 for print)',
+					},
+					{
+						displayName: 'Scale',
+						name: 'scale',
+						type: 'number',
+						default: 1,
+						typeOptions: {
+							minValue: 0.1,
+							maxValue: 10,
+							numberPrecision: 1,
+						},
+						description: 'Scale factor for the rendered output (0.1 to 10)',
+					},
+					{
+						displayName: 'Trim End (Seconds)',
+						name: 'videoTrimEnd',
+						type: 'number',
+						displayOptions: {
+							show: {
+								'/operation': ['https://api.orshot.com/v1/studio/render'],
+								'/responseFormat': ['mp4', 'webm', 'gif'],
+							},
+						},
+						default: 0,
+						description: 'End time in seconds to trim the video',
+					},
+					{
+						displayName: 'Trim Start (Seconds)',
+						name: 'videoTrimStart',
+						type: 'number',
+						displayOptions: {
+							show: {
+								'/operation': ['https://api.orshot.com/v1/studio/render'],
+								'/responseFormat': ['mp4', 'webm', 'gif'],
+							},
+						},
+						default: 0,
+						description: 'Start time in seconds to trim the video',
+					},
+				],
 			},
 			{
 				displayName: 'Modifications',
@@ -412,8 +591,14 @@ export class Orshot implements INodeType {
 					templateId = this.getNodeParameter('studioTemplateId', itemIndex, '') as string;
 				}
 				
-				const responseType = this.getNodeParameter('responseType', itemIndex, '') as string;
 				const responseFormat = this.getNodeParameter('responseFormat', itemIndex, '') as string;
+				
+				let responseType: string;
+				if (['mp4', 'webm', 'gif'].includes(responseFormat)) {
+					responseType = 'url';
+				} else {
+					responseType = this.getNodeParameter('responseType', itemIndex, '') as string;
+				}
 				
 				// Get the modifications from the correct parameter based on operation
 				let modificationsData: any;
@@ -443,17 +628,20 @@ export class Orshot implements INodeType {
 						type: responseType,
 					},
 				};
+				
+				// Get collection options
+				const options = this.getNodeParameter('options', itemIndex, {}) as any;
 
 				// Add scale parameter (works for both library and studio templates)
-				const scale = this.getNodeParameter('scale', itemIndex, 1) as number;
+				const scale = options.scale as number;
 				if (scale && scale !== 1) {
 					requestBody.response.scale = scale;
 				}
 
 				// Add studio-specific parameters
 				if (operation === 'https://api.orshot.com/v1/studio/render') {
-					const customFileName = this.getNodeParameter('customFileName', itemIndex, '') as string;
-					const includePages = this.getNodeParameter('includePages', itemIndex, '') as string;
+					const customFileName = options.customFileName as string;
+					const includePages = options.includePages as string;
 
 					if (customFileName && (responseType === 'url' || responseType === 'binary')) {
 						requestBody.response.fileName = customFileName;
@@ -463,13 +651,66 @@ export class Orshot implements INodeType {
 						// Parse comma-separated page numbers
 						const pageNumbers = includePages
 							.split(',')
-							.map(p => p.trim())
-							.filter(p => p !== '')
-							.map(p => parseInt(p, 10))
-							.filter(p => !isNaN(p) && p > 0);
+							.map((p: string) => p.trim())
+							.filter((p: string) => p !== '')
+							.map((p: string) => parseInt(p, 10))
+							.filter((p: number) => !isNaN(p) && p > 0);
 						
 						if (pageNumbers.length > 0) {
 							requestBody.response.includePages = pageNumbers;
+						}
+					}
+
+					// Process PDF Options
+					if (responseFormat === 'pdf') {
+						const pdfOptions: any = {};
+						if (options.pdfDpi) pdfOptions.dpi = options.pdfDpi;
+						if (options.pdfMargin) pdfOptions.margin = options.pdfMargin;
+						if (options.pdfColorMode) pdfOptions.colorMode = options.pdfColorMode;
+						if (options.pdfRangeFrom) pdfOptions.rangeFrom = options.pdfRangeFrom;
+						
+						let pdfRangeTo = options.pdfRangeTo as number;
+						
+						// If pdfRangeTo is not set (0), fetch template details to set it to max pages
+						if (!pdfRangeTo || pdfRangeTo === 0) {
+							try {
+								const templatesResponse = await this.helpers.httpRequestWithAuthentication.call(this, 'orshotApi', {
+									method: 'GET',
+									url: 'https://api.orshot.com/v1/studio/templates',
+									headers: {
+										'Content-Type': 'application/json',
+									},
+								});
+								
+								const templates = Array.isArray(templatesResponse) ? templatesResponse : [];
+								// templateId can be string or number, ensure comparison works
+								const currentTemplate = templates.find((t: any) => String(t.id) === String(templateId));
+								
+								if (currentTemplate && currentTemplate.pages_data && Array.isArray(currentTemplate.pages_data)) {
+									pdfRangeTo = currentTemplate.pages_data.length;
+								}
+							} catch (error) {
+								// Ignore error and continue without setting default range
+							}
+						}
+						
+						if (pdfRangeTo) pdfOptions.rangeTo = pdfRangeTo;
+						
+						if (Object.keys(pdfOptions).length > 0) {
+							requestBody.response.pdfOptions = pdfOptions;
+						}
+					}
+					
+					// Process Video Options
+					if (['mp4', 'webm', 'gif'].includes(responseFormat)) {
+						const videoOptions: any = {};
+						if (options.videoLoop) videoOptions.loop = options.videoLoop;
+						if (options.videoMuted) videoOptions.muted = options.videoMuted;
+						if (options.videoTrimStart) videoOptions.trimStart = options.videoTrimStart;
+						if (options.videoTrimEnd) videoOptions.trimEnd = options.videoTrimEnd;
+						
+						if (Object.keys(videoOptions).length > 0) {
+							requestBody.response.videoOptions = videoOptions;
 						}
 					}
 				}
