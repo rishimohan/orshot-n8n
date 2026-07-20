@@ -22,6 +22,53 @@ const getMimeType = (format: string): string => {
 	return mimeTypes[format] || 'application/octet-stream';
 };
 
+// Smart Resize presets supported by the render API's response.size /
+// response.extraSizes (kept in sync with Orshot's ADAPTIVE_SIZE_PRESETS)
+const SIZE_PRESET_OPTIONS = [
+	{ name: 'A4 Document (2480x3508)', value: 'a4-document' },
+	{ name: 'Blog Header (1200x630)', value: 'blog-header' },
+	{ name: 'Business Card (1050x600)', value: 'business-card' },
+	{ name: 'Email Header (600x200)', value: 'email-header' },
+	{ name: 'Facebook Cover Photo (851x315)', value: 'facebook-cover' },
+	{ name: 'Facebook Post (1200x630)', value: 'facebook-post' },
+	{ name: 'Facebook Story (1080x1920)', value: 'facebook-story' },
+	{ name: 'Instagram Post (Landscape) (1080x566)', value: 'instagram-post-landscape' },
+	{ name: 'Instagram Post (Portrait) (1080x1350)', value: 'instagram-post-portrait' },
+	{ name: 'Instagram Post (Square) (1080x1080)', value: 'instagram-post' },
+	{ name: 'Instagram Story/Reel (1080x1920)', value: 'instagram-story' },
+	{ name: 'Leaderboard Ad (728x90)', value: 'leaderboard-ad' },
+	{ name: 'LinkedIn Banner (1584x396)', value: 'linkedin-banner' },
+	{ name: 'LinkedIn Post (1200x627)', value: 'linkedin-post' },
+	{ name: 'Medium Rectangle Ad (300x250)', value: 'medium-rectangle-ad' },
+	{ name: 'Open Graph Image (1200x630)', value: 'og-image' },
+	{ name: 'Pinterest Pin (1000x1500)', value: 'pinterest-pin' },
+	{ name: 'Presentation 16:9 (1920x1080)', value: 'presentation-16-9' },
+	{ name: 'TikTok Video (1080x1920)', value: 'tiktok-video' },
+	{ name: 'Twitter/X Header (1500x500)', value: 'twitter-header' },
+	{ name: 'Twitter/X Post (1200x675)', value: 'twitter-post' },
+	{ name: 'US Letter (2550x3300)', value: 'us-letter' },
+	{ name: 'Website Banner (1920x600)', value: 'website-banner' },
+	{ name: 'WhatsApp Status (1080x1920)', value: 'whatsapp-status' },
+	{ name: 'YouTube Short (1080x1920)', value: 'youtube-short' },
+	{ name: 'YouTube Thumbnail (1280x720)', value: 'youtube-thumbnail' },
+	{ name: 'Zoom Background (1920x1080)', value: 'zoom-background' },
+];
+
+const LIBRARY_RENDER_OP = 'https://api.orshot.com/v1/generate/images';
+const STUDIO_RENDER_OP = 'https://api.orshot.com/v1/studio/render';
+const SOCIAL_PUBLISH_OP = 'socialPublish';
+const BRAND_ASSETS_OP = 'brandAssets';
+
+const parseJsonOption = (value: any): { invalid?: boolean; value?: any } => {
+	if (value === undefined || value === null || value === '') return {};
+	if (typeof value === 'object') return { value };
+	try {
+		return { value: JSON.parse(value as string) };
+	} catch {
+		return { invalid: true };
+	}
+};
+
 export class Orshot implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Orshot',
@@ -29,7 +76,7 @@ export class Orshot implements INodeType {
 		group: ['transform'],
 		icon: 'file:orshot.svg',
     documentationUrl: 'https://el.orshot.com/n8n-docs',
-		version: 3,
+		version: [3, 4],
 		description: 'Automated Image Generation for Marketing',
 		defaults: {
 			name: 'Orshot',
@@ -50,17 +97,30 @@ export class Orshot implements INodeType {
 				type: 'options',
         noDataExpression: true,
 				default: 'https://api.orshot.com/v1/generate/images',
+        // eslint-disable-next-line n8n-nodes-base/node-param-options-type-unsorted-items
         options: [{
+          name: 'Generate Image From an Orshot Studio Template',
+          value: 'https://api.orshot.com/v1/studio/render',
+          description: 'Render a template you designed in Orshot Studio',
+          action: 'Generate an image from a studio template',
+        },
+        {
           name: 'Generate Image From a Library Template',
           value: 'https://api.orshot.com/v1/generate/images',
-          description: 'Endpoint: https://api.orshot.com/v1/generate/images',
+          description: 'Render a pre-designed template from the Orshot library',
           action: 'Generate an image from a library template',
         },
         {
-          name: 'Generate Image From an Orshot Studio Template',
-          value: 'https://api.orshot.com/v1/studio/render',
-          description: 'Endpoint: https://api.orshot.com/v1/studio/render',
-          action: 'Generate an image from a studio template',
+          name: 'Get Brand Assets',
+          value: 'brandAssets',
+          description: 'Fetch your workspace brand kit (images, colors, fonts, videos, audio)',
+          action: 'Get brand assets',
+        },
+        {
+          name: 'Publish to Social Media',
+          value: 'socialPublish',
+          description: 'Post or schedule content to your connected social media accounts',
+          action: 'Publish to social media',
         }],
 				required: true,
 				description: 'Orshot API Endpoint URL(ref: https://orshot.com/docs/api-reference)',
@@ -105,7 +165,7 @@ export class Orshot implements INodeType {
           {
             name: 'GIF',
             value: 'gif',
-            description: 'Animated GIF (Studio templates only)',
+            description: 'Animated GIF',
           },
           {
             name: 'JPEG',
@@ -118,7 +178,7 @@ export class Orshot implements INodeType {
           {
             name: 'MP4',
             value: 'mp4',
-            description: 'Video format (Studio templates only)',
+            description: 'Video',
           },
           {
             name: 'PDF',
@@ -131,7 +191,7 @@ export class Orshot implements INodeType {
           {
             name: 'WebM',
             value: 'webm',
-            description: 'Video format (Studio templates only)',
+            description: 'Video',
           },
           {
             name: 'WebP',
@@ -140,7 +200,85 @@ export class Orshot implements INodeType {
         ],
 				default: 'png',
 				required: true,
-				description: 'Format of the rendered image',
+				displayOptions: {
+					show: {
+						operation: ['https://api.orshot.com/v1/studio/render'],
+					},
+				},
+				description: 'Format of the rendered output',
+			},
+			{
+				displayName: 'Response Format',
+				name: 'responseFormat',
+				type: 'options',
+				options: [
+          {
+            name: 'JPEG',
+            value: 'jpeg',
+          },
+          {
+            name: 'JPG',
+            value: 'jpg',
+          },
+          {
+            name: 'PDF',
+            value: 'pdf',
+          },
+          {
+            name: 'PNG',
+            value: 'png',
+          },
+          {
+            name: 'WebP',
+            value: 'webp',
+          },
+        ],
+				default: 'png',
+				required: true,
+				displayOptions: {
+					show: {
+						operation: ['https://api.orshot.com/v1/generate/images'],
+					},
+				},
+				description: 'Format of the rendered output',
+			},
+			{
+				displayName: 'Response Type',
+				name: 'responseType',
+				type: 'options',
+				// eslint-disable-next-line n8n-nodes-base/node-param-options-type-unsorted-items
+				options: [
+					{
+						name: 'URL',
+						value: 'url',
+						description: 'Hosted URL of the generated file (easiest to pass to other nodes)',
+					},
+					{
+						name: 'Base64',
+						value: 'base64',
+						description: 'Raw base64 string of the file in the JSON output',
+					},
+					{
+						name: 'Binary',
+						value: 'binary',
+						description: 'N8n binary data (for upload or attachment nodes)',
+					},
+				],
+				default: 'url',
+				required: true,
+				displayOptions: {
+					show: {
+						'@version': [{ _cnd: { gte: 4 } }],
+						operation: [
+							'https://api.orshot.com/v1/generate/images',
+							'https://api.orshot.com/v1/studio/render',
+						],
+					},
+					hide: {
+						responseFormat: ['mp4', 'webm', 'gif'],
+					},
+				},
+				description: 'How the generated file is returned',
 			},
 			{
 				displayName: 'Response Type',
@@ -163,6 +301,13 @@ export class Orshot implements INodeType {
 				default: 'base64',
 				required: true,
 				displayOptions: {
+					show: {
+						'@version': [3],
+						operation: [
+							'https://api.orshot.com/v1/generate/images',
+							'https://api.orshot.com/v1/studio/render',
+						],
+					},
 					hide: {
 						responseFormat: ['mp4', 'webm', 'gif'],
 					},
@@ -183,6 +328,10 @@ export class Orshot implements INodeType {
 				required: true,
 				displayOptions: {
 					show: {
+						operation: [
+							'https://api.orshot.com/v1/generate/images',
+							'https://api.orshot.com/v1/studio/render',
+						],
 						responseFormat: ['mp4', 'webm', 'gif'],
 					},
 				},
@@ -194,7 +343,52 @@ export class Orshot implements INodeType {
 				type: 'collection',
 				placeholder: 'Add Option',
 				default: {},
+				displayOptions: {
+					show: {
+						operation: [
+							'https://api.orshot.com/v1/generate/images',
+							'https://api.orshot.com/v1/studio/render',
+						],
+					},
+				},
 				options: [
+					{
+						displayName: 'Additional Custom Sizes',
+						name: 'extraCustomSizes',
+						type: 'string',
+						displayOptions: {
+							show: {
+								extraSizes: ['custom'],
+							},
+						},
+						default: '',
+						placeholder: '800x600, 1200x1200',
+						description: 'Comma-separated list of custom WIDTHxHEIGHT sizes to render alongside the main output',
+					},
+					{
+						displayName: 'Additional Sizes',
+						name: 'extraSizes',
+						type: 'multiOptions',
+						// eslint-disable-next-line n8n-nodes-base/node-param-options-type-unsorted-items
+						options: [
+							{
+								name: 'Custom Sizes (Enter Below)',
+								value: 'custom',
+								description: 'Add custom WIDTHxHEIGHT sizes',
+							},
+							...SIZE_PRESET_OPTIONS,
+						],
+						displayOptions: {
+							show: {
+								'/operation': ['https://api.orshot.com/v1/studio/render'],
+							},
+							hide: {
+								'/responseFormat': ['mp4', 'webm', 'gif'],
+							},
+						},
+						default: [],
+						description: 'Smart Resize: also render the design at these sizes in the same call. Each output includes an "extraSizes" array with a URL per size. Image and PDF formats only.',
+					},
 					{
 						displayName: 'Custom File Name',
 						name: 'customFileName',
@@ -324,6 +518,42 @@ export class Orshot implements INodeType {
 						description: 'DPI for the PDF output (72 is standard, 300 for print)',
 					},
 					{
+						displayName: 'Resize To',
+						name: 'resizeTo',
+						type: 'options',
+						// eslint-disable-next-line n8n-nodes-base/node-param-options-type-unsorted-items
+						options: [
+							{
+								name: 'Custom Size (Enter Below)',
+								value: 'custom',
+								description: 'Enter a custom WIDTHxHEIGHT size',
+							},
+							...SIZE_PRESET_OPTIONS,
+						],
+						displayOptions: {
+							show: {
+								'/operation': ['https://api.orshot.com/v1/studio/render'],
+							},
+						},
+						// 'instagram-story' is inside the spread SIZE_PRESET_OPTIONS, which the lint rule can't see
+						// eslint-disable-next-line n8n-nodes-base/node-param-default-wrong-for-options
+						default: 'instagram-story',
+						description: 'Smart Resize: render this design at a different size. The layout automatically adapts to fit the new dimensions.',
+					},
+					{
+						displayName: 'Resize To Custom Size',
+						name: 'resizeCustomSize',
+						type: 'string',
+						displayOptions: {
+							show: {
+								resizeTo: ['custom'],
+							},
+						},
+						default: '',
+						placeholder: '1080x1920',
+						description: 'Custom size as WIDTHxHEIGHT in pixels',
+					},
+					{
 						displayName: 'Scale',
 						name: 'scale',
 						type: 'number',
@@ -368,7 +598,7 @@ export class Orshot implements INodeType {
 				name: 'libraryModifications',
 				type: 'fixedCollection',
 				placeholder: 'Add Modification',
-				default: {},
+				default: { modification: [{ key: '', value: '' }] },
         displayOptions: {
           show: {
             operation: ['https://api.orshot.com/v1/generate/images'],
@@ -399,7 +629,8 @@ export class Orshot implements INodeType {
 								name: 'value',
 								type: 'string',
 								default: '',
-								description: 'Enter the value for this modification',
+								placeholder: 'Leave empty to use the template default',
+								description: 'New value for this key. If left empty, the key is not sent and the template renders with its saved default (shown under the key in the dropdown).',
 							},
 						],
 					},
@@ -411,7 +642,7 @@ export class Orshot implements INodeType {
 				name: 'studioModifications',
 				type: 'fixedCollection',
 				placeholder: 'Add Modification',
-				default: {},
+				default: { modification: [{ key: '', value: '' }] },
         displayOptions: {
           show: {
             operation: ['https://api.orshot.com/v1/studio/render'],
@@ -442,12 +673,162 @@ export class Orshot implements INodeType {
 								name: 'value',
 								type: 'string',
 								default: '',
-								description: 'Enter the value for this modification',
+								placeholder: 'Leave empty to use the template default',
+								description: 'New value for this key. If left empty, the key is not sent and the template renders with its saved default (shown under the key in the dropdown).',
 							},
 						],
 					},
 				],
 				description: 'Template modifications to apply. Select a modification key and enter its value.',
+			},
+			{
+				displayName: 'Social Account Names or IDs',
+				name: 'socialAccounts',
+				type: 'multiOptions',
+				typeOptions: {
+					loadOptionsMethod: 'getSocialAccounts',
+				},
+				default: [],
+				required: true,
+				displayOptions: {
+					show: {
+						operation: ['socialPublish'],
+					},
+				},
+				description: 'Social accounts to publish to. Choose from the list, or specify IDs using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
+			},
+			{
+				displayName: 'Post Content',
+				name: 'socialContent',
+				type: 'string',
+				typeOptions: {
+					rows: 4,
+				},
+				default: '',
+				displayOptions: {
+					show: {
+						operation: ['socialPublish'],
+					},
+				},
+				description: 'Caption/text of the post (max 5000 characters)',
+			},
+			{
+				displayName: 'Media URLs',
+				name: 'socialMediaUrls',
+				type: 'string',
+				default: '',
+				placeholder: 'https://storage.orshot.com/...png, https://...',
+				displayOptions: {
+					show: {
+						operation: ['socialPublish'],
+					},
+				},
+				description: 'Comma-separated image/video URLs to attach. Tip: chain an Orshot render operation with Response Type "URL" and reference its output here.',
+			},
+			{
+				displayName: 'Schedule At',
+				name: 'socialScheduledFor',
+				type: 'dateTime',
+				default: '',
+				displayOptions: {
+					show: {
+						operation: ['socialPublish'],
+					},
+				},
+				description: 'When to publish the post. Leave empty to publish immediately.',
+			},
+			{
+				displayName: 'Options',
+				name: 'socialOptions',
+				type: 'collection',
+				placeholder: 'Add Option',
+				default: {},
+				displayOptions: {
+					show: {
+						operation: ['socialPublish'],
+					},
+				},
+				options: [
+					{
+						displayName: 'Platform Options',
+						name: 'platformOptions',
+						type: 'json',
+						default: '',
+						description: 'Advanced per-platform publishing options as JSON',
+					},
+					{
+						displayName: 'Save as Draft',
+						name: 'isDraft',
+						type: 'boolean',
+						default: false,
+						description: 'Whether to save the post as a draft instead of publishing it',
+					},
+					{
+						displayName: 'TikTok Settings',
+						name: 'tiktokSettings',
+						type: 'json',
+						default: '',
+						description: 'TikTok-specific settings as JSON (camelCase keys)',
+					},
+					{
+						displayName: 'Timezone',
+						name: 'timezone',
+						type: 'string',
+						default: '',
+						placeholder: 'Europe/Amsterdam',
+						description: 'Timezone used for the scheduled time',
+					},
+				],
+			},
+			{
+				displayName: 'Asset Type',
+				name: 'brandAssetType',
+				type: 'options',
+				options: [
+					{
+						name: 'All',
+						value: 'all',
+					},
+					{
+						name: 'Audio',
+						value: 'audio',
+					},
+					{
+						name: 'Colors',
+						value: 'colors',
+					},
+					{
+						name: 'Fonts',
+						value: 'fonts',
+					},
+					{
+						name: 'Images',
+						value: 'images',
+					},
+					{
+						name: 'Videos',
+						value: 'videos',
+					},
+				],
+				default: 'all',
+				displayOptions: {
+					show: {
+						operation: ['brandAssets'],
+					},
+				},
+				description: 'Which brand kit assets to fetch',
+			},
+			{
+				displayName: 'Filter by Tag',
+				name: 'brandAssetTag',
+				type: 'string',
+				default: '',
+				displayOptions: {
+					show: {
+						operation: ['brandAssets'],
+					},
+				},
+				description: 'Only return assets with this tag. Leave empty to return all assets.',
 			},
 		],
 	};
@@ -465,10 +846,11 @@ export class Orshot implements INodeType {
 						});
 
 						const templates = Array.isArray(response) ? response : [];
-						
+
 						return templates.map((template: any) => ({
 							name: `${template.title}`,
 							value: template.id,
+							description: `ID: ${template.id}`,
 						}));
 					} catch (error) {
 						throw new NodeOperationError(this.getNode(), `Failed to load templates: ${error.message}`);
@@ -476,20 +858,31 @@ export class Orshot implements INodeType {
 				},
 				async getStudioTemplates(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
 					try {
-						const response = await this.helpers.httpRequestWithAuthentication.call(this, 'orshotApi', {
-							method: 'GET',
-							url: 'https://api.orshot.com/v1/studio/templates',
-							headers: {
-								'Content-Type': 'application/json',
-							},
-						});
+						// Paginated endpoint — aggregate all pages so every template
+						// shows up in the dropdown (40 per page, hard cap 50 pages)
+						const templates: any[] = [];
+						let page = 1;
+						while (page <= 50) {
+							const response = await this.helpers.httpRequestWithAuthentication.call(this, 'orshotApi', {
+								method: 'GET',
+								url: `https://api.orshot.com/v1/studio/templates/all?page=${page}&limit=40`,
+								headers: {
+									'Content-Type': 'application/json',
+								},
+							});
 
-						const templates = Array.isArray(response) ? response : [];
-						
+							const pageTemplates = Array.isArray(response?.data) ? response.data : [];
+							templates.push(...pageTemplates);
+
+							const totalPages = response?.pagination?.totalPages || 1;
+							if (page >= totalPages || pageTemplates.length === 0) break;
+							page++;
+						}
+
 						return templates.map((template: any) => ({
 							name: `${template.name}`,
 							value: template.id,
-              description: template?.description || '',
+							description: `ID: ${template.id}`,
 						}));
 					} catch (error) {
 						throw new NodeOperationError(this.getNode(), `Failed to load studio templates: ${error.message}`);
@@ -516,8 +909,9 @@ export class Orshot implements INodeType {
 
 						if (selectedTemplate && selectedTemplate.modifications) {
 							return selectedTemplate.modifications.map((modification: any) => ({
-								name: modification.description || modification.key,
+								name: modification.key,
 								value: modification.key,
+								description: modification.description || '',
 							}));
 						}
 
@@ -531,10 +925,11 @@ export class Orshot implements INodeType {
 						});
 
 						const modifications = Array.isArray(response) ? response : [];
-						
+
 						return modifications.map((modification: any) => ({
-							name: modification.description || modification.key,
+							name: modification.key,
 							value: modification.key,
+							description: modification.description || '',
 						}));
 					} catch (error) {
 						// Return empty array instead of throwing error to avoid breaking the UI
@@ -559,13 +954,59 @@ export class Orshot implements INodeType {
 						});
 
 						const modifications = Array.isArray(response) ? response : [];
-						
-						return modifications.map((modification: any) => ({
-							name: modification.description || modification.id,
-							value: modification.id,
-						}));
+
+						return modifications.map((modification: any) => {
+							// Show the param's current/default value as the subtitle —
+							// far more recognizable than a generic type description
+							const example = `${modification.example ?? ''}`.replace(/\s+/g, ' ').trim();
+							const preview = example.length > 60 ? `${example.slice(0, 57)}...` : example;
+							return {
+								name: modification.id,
+								value: modification.id,
+								description: preview ? `Default: ${preview}` : modification.description || '',
+							};
+						});
 					} catch (error) {
 						// Return empty array instead of throwing error to avoid breaking the UI
+						return [{
+							name: `Error: ${error.message}`,
+							value: 'error',
+						}];
+					}
+				},
+				async getSocialAccounts(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+					try {
+						const response = await this.helpers.httpRequestWithAuthentication.call(this, 'orshotApi', {
+							method: 'GET',
+							url: 'https://api.orshot.com/v1/social/accounts',
+							headers: {
+								'Content-Type': 'application/json',
+							},
+						});
+
+						const accounts = Array.isArray(response?.data) ? response.data : [];
+
+						if (accounts.length === 0) {
+							return [{
+								name: 'No Connected Accounts Found — Connect One in Orshot First',
+								value: '',
+							}];
+						}
+
+						return accounts.map((account: any) => {
+							const platform = account.platform
+								? account.platform.charAt(0).toUpperCase() + account.platform.slice(1)
+								: 'Account';
+							const handle = account.account_username
+								? `@${account.account_username}`
+								: account.account_name || account.id;
+							return {
+								name: `${platform}: ${handle}`,
+								value: account.id,
+								description: account.account_name || '',
+							};
+						});
+					} catch (error) {
 						return [{
 							name: `Error: ${error.message}`,
 							value: 'error',
@@ -582,12 +1023,101 @@ export class Orshot implements INodeType {
 		for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
 			try {
 				const operation = this.getNodeParameter('operation', itemIndex, '') as string;
+
+				// ── Publish to Social Media ──────────────────────────────────
+				if (operation === SOCIAL_PUBLISH_OP) {
+					const accounts = (this.getNodeParameter('socialAccounts', itemIndex, []) as string[]).filter(
+						(id) => id && id !== 'error',
+					);
+					if (accounts.length === 0) {
+						throw new NodeOperationError(this.getNode(), 'Select at least one social account to publish to', {
+							itemIndex,
+						});
+					}
+
+					const content = this.getNodeParameter('socialContent', itemIndex, '') as string;
+					const mediaUrlsRaw = this.getNodeParameter('socialMediaUrls', itemIndex, '') as string;
+					const scheduledFor = this.getNodeParameter('socialScheduledFor', itemIndex, '') as string;
+					const socialOptions = this.getNodeParameter('socialOptions', itemIndex, {}) as any;
+
+					const mediaUrls = mediaUrlsRaw
+						.split(',')
+						.map((url: string) => url.trim())
+						.filter((url: string) => url !== '');
+
+					const body: any = { accounts };
+					if (content) body.content = content;
+					if (mediaUrls.length > 0) body.media_urls = mediaUrls;
+					if (scheduledFor) {
+						body.schedule = { scheduledFor: new Date(scheduledFor).toISOString() };
+					}
+					if (socialOptions.timezone) body.timezone = socialOptions.timezone;
+					if (socialOptions.isDraft) body.isDraft = true;
+					const platformOptions = parseJsonOption(socialOptions.platformOptions);
+					if (platformOptions.invalid) {
+						throw new NodeOperationError(this.getNode(), 'Platform Options must be valid JSON', { itemIndex });
+					}
+					if (platformOptions.value !== undefined) body.platformOptions = platformOptions.value;
+					const tiktokSettings = parseJsonOption(socialOptions.tiktokSettings);
+					if (tiktokSettings.invalid) {
+						throw new NodeOperationError(this.getNode(), 'TikTok Settings must be valid JSON', { itemIndex });
+					}
+					if (tiktokSettings.value !== undefined) body.tiktokSettings = tiktokSettings.value;
+
+					const publishResponse = await this.helpers.httpRequestWithAuthentication.call(this, 'orshotApi', {
+						method: 'POST',
+						url: 'https://api.orshot.com/v1/social/publish',
+						headers: {
+							'Content-Type': 'application/json',
+						},
+						body,
+					});
+
+					const publishData = publishResponse?.data ?? publishResponse;
+					returnData.push({
+						json: publishData && typeof publishData === 'object' ? publishData : { data: publishData },
+						pairedItem: itemIndex,
+					});
+					continue;
+				}
+
+				// ── Get Brand Assets ─────────────────────────────────────────
+				if (operation === BRAND_ASSETS_OP) {
+					const assetType = this.getNodeParameter('brandAssetType', itemIndex, 'all') as string;
+					const tag = (this.getNodeParameter('brandAssetTag', itemIndex, '') as string).trim();
+					const assetTypes = assetType === 'all' ? ['images', 'colors', 'fonts', 'videos', 'audio'] : [assetType];
+					const query = tag ? `?tag=${encodeURIComponent(tag)}` : '';
+
+					const assetResults = await Promise.all(
+						assetTypes.map(async (type: string) => {
+							const assetResponse = await this.helpers.httpRequestWithAuthentication.call(this, 'orshotApi', {
+								method: 'GET',
+								url: `https://api.orshot.com/v1/brand-assets/${type}/get${query}`,
+								headers: {
+									'Content-Type': 'application/json',
+								},
+							});
+							return { type, data: assetResponse?.data ?? assetResponse };
+						}),
+					);
+
+					const assets: any = {};
+					for (const result of assetResults) {
+						assets[result.type] = result.data;
+					}
+
+					returnData.push({
+						json: assets,
+						pairedItem: itemIndex,
+					});
+					continue;
+				}
 				
 				// Get the correct templateId based on the operation
-				let templateId: string;
-				if (operation === 'https://api.orshot.com/v1/generate/images') {
+				let templateId = '';
+				if (operation === LIBRARY_RENDER_OP) {
 					templateId = this.getNodeParameter('libraryTemplateId', itemIndex, '') as string;
-				} else {
+				} else if (operation === STUDIO_RENDER_OP) {
 					templateId = this.getNodeParameter('studioTemplateId', itemIndex, '') as string;
 				}
 				
@@ -642,6 +1172,28 @@ export class Orshot implements INodeType {
 				if (operation === 'https://api.orshot.com/v1/studio/render') {
 					const customFileName = options.customFileName as string;
 					const includePages = options.includePages as string;
+
+					// Smart Resize: replace size (response.size)
+					const resizeTo = (options.resizeTo as string) || '';
+					const resizeSize =
+						resizeTo === 'custom' ? ((options.resizeCustomSize as string) || '').trim() : resizeTo;
+					if (resizeSize) {
+						requestBody.response.size = resizeSize;
+					}
+
+					// Smart Resize: additional sizes (response.extraSizes) — image/PDF only.
+					// 'custom' is the "Custom Sizes (Enter Below)" toggle, not a real size.
+					const extraSizePresets = ((options.extraSizes as string[]) || []).filter(
+						(size) => size !== '' && size !== 'custom',
+					);
+					const extraCustomSizes = ((options.extraCustomSizes as string) || '')
+						.split(',')
+						.map((size: string) => size.trim())
+						.filter((size: string) => size !== '');
+					const allExtraSizes = [...extraSizePresets, ...extraCustomSizes];
+					if (allExtraSizes.length > 0 && !['mp4', 'webm', 'gif'].includes(responseFormat)) {
+						requestBody.response.extraSizes = allExtraSizes;
+					}
 
 					if (customFileName && (responseType === 'url' || responseType === 'binary')) {
 						requestBody.response.fileName = customFileName;
@@ -810,10 +1362,10 @@ export class Orshot implements INodeType {
 				const operation = this.getNodeParameter('operation', itemIndex, '') as string;
 				
 				// Get the correct templateId based on the operation
-				let templateId: string;
-				if (operation === 'https://api.orshot.com/v1/generate/images') {
+				let templateId = '';
+				if (operation === LIBRARY_RENDER_OP) {
 					templateId = this.getNodeParameter('libraryTemplateId', itemIndex, '') as string;
-				} else {
+				} else if (operation === STUDIO_RENDER_OP) {
 					templateId = this.getNodeParameter('studioTemplateId', itemIndex, '') as string;
 				}
 				

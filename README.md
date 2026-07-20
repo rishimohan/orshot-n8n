@@ -22,6 +22,8 @@ Follow the [installation guide](https://docs.n8n.io/integrations/community-nodes
 
 - Generate Images from a Library Template
 - Generate Images from a Orshot Studio Templates
+- Publish to Social Media (post or schedule content to your connected social accounts)
+- Get Brand Assets (fetch your workspace brand kit: images, colors, fonts, videos, audio)
 
 ## Credentials
 
@@ -48,6 +50,18 @@ You can refer to [Orshot API Docs](https://orshot.com/docs) to refer to the APIs
 - [Integrations](https://orshot.com/integrations)
 
 ## Version history
+
+#### 0.6.0
+
+- Added Smart Resize for studio templates: "Resize To" option with 28 presets (Instagram Story, OG Image, etc.) or a custom WIDTHxHEIGHT
+- Added "Additional Sizes" option to render extra sized copies of the same design in one call (returned in the `extraSizes` array on the response)
+- New operation: Publish to Social Media - post or schedule renders to connected social accounts, with drafts, timezone and TikTok settings
+- New operation: Get Brand Assets - fetch your workspace brand kit (images, colors, fonts, videos, audio) with optional tag filter
+- New nodes default to URL response type (existing nodes keep their behavior via node versioning)
+- Response formats are now scoped per operation (video/GIF only for studio templates)
+- Template dropdown loads all templates via pagination and shows template IDs
+- Modification dropdown shows unique keys with their current default value; one modification row is pre-added
+- PDF, video and file name options appear based on the selected response format
 
 #### 0.5.0
 
