@@ -1,0 +1,44 @@
+name: Release to npm
+
+# n8n requires community node releases to be published from GitHub Actions
+# with a provenance statement (mandatory since May 1, 2026).
+#
+# Publish auth uses npm Trusted Publishing (OIDC) — configure this repo and
+# workflow file as a trusted publisher for @thelifeofrishi/n8n-nodes-orshot
+# on npmjs.com (package Settings -> Trusted Publisher). No token needed.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # required for npm provenance via OIDC
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Ensure npm with trusted-publishing support
+        run: npm install -g npm@latest
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Publish with provenance
+        run: npm publish --provenance --access public
