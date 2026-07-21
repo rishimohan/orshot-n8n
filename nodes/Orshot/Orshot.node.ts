@@ -6,7 +6,8 @@ import type {
 	INodeType,
 	INodeTypeDescription,
 } from 'n8n-workflow';
-import { NodeConnectionType, NodeOperationError } from 'n8n-workflow';
+import { NodeApiError, NodeConnectionType, NodeOperationError } from 'n8n-workflow';
+import type { JsonObject } from 'n8n-workflow';
 
 const getMimeType = (format: string): string => {
 	const mimeTypes: { [key: string]: string } = {
@@ -74,7 +75,9 @@ export class Orshot implements INodeType {
 		displayName: 'Orshot',
 		name: 'orshot',
 		group: ['transform'],
-		icon: 'file:orshot.svg',
+		icon: { light: 'file:orshot.svg', dark: 'file:orshot.dark.svg' },
+		subtitle:
+			'={{ $parameter["operation"] === "https://api.orshot.com/v1/generate/images" ? "Library Template" : $parameter["operation"] === "https://api.orshot.com/v1/studio/render" ? "Studio Template" : $parameter["operation"] === "brandAssets" ? "Brand Assets" : "Publish to Social Media" }}',
     documentationUrl: 'https://el.orshot.com/n8n-docs',
 		version: [3, 4],
 		description: 'Automated Image Generation for Marketing',
@@ -97,18 +100,17 @@ export class Orshot implements INodeType {
 				type: 'options',
         noDataExpression: true,
 				default: 'https://api.orshot.com/v1/generate/images',
-        // eslint-disable-next-line n8n-nodes-base/node-param-options-type-unsorted-items
         options: [{
-          name: 'Generate Image From an Orshot Studio Template',
-          value: 'https://api.orshot.com/v1/studio/render',
-          description: 'Render a template you designed in Orshot Studio',
-          action: 'Generate an image from a studio template',
-        },
-        {
           name: 'Generate Image From a Library Template',
           value: 'https://api.orshot.com/v1/generate/images',
           description: 'Render a pre-designed template from the Orshot library',
           action: 'Generate an image from a library template',
+        },
+        {
+          name: 'Generate Image From an Orshot Studio Template',
+          value: 'https://api.orshot.com/v1/studio/render',
+          description: 'Render a template you designed in Orshot Studio',
+          action: 'Generate an image from a studio template',
         },
         {
           name: 'Get Brand Assets',
@@ -246,13 +248,7 @@ export class Orshot implements INodeType {
 				displayName: 'Response Type',
 				name: 'responseType',
 				type: 'options',
-				// eslint-disable-next-line n8n-nodes-base/node-param-options-type-unsorted-items
 				options: [
-					{
-						name: 'URL',
-						value: 'url',
-						description: 'Hosted URL of the generated file (easiest to pass to other nodes)',
-					},
 					{
 						name: 'Base64',
 						value: 'base64',
@@ -262,6 +258,11 @@ export class Orshot implements INodeType {
 						name: 'Binary',
 						value: 'binary',
 						description: 'N8n binary data (for upload or attachment nodes)',
+					},
+					{
+						name: 'URL',
+						value: 'url',
+						description: 'Hosted URL of the generated file (easiest to pass to other nodes)',
 					},
 				],
 				default: 'url',
@@ -369,7 +370,6 @@ export class Orshot implements INodeType {
 						displayName: 'Additional Sizes',
 						name: 'extraSizes',
 						type: 'multiOptions',
-						// eslint-disable-next-line n8n-nodes-base/node-param-options-type-unsorted-items
 						options: [
 							{
 								name: 'Custom Sizes (Enter Below)',
@@ -521,7 +521,6 @@ export class Orshot implements INodeType {
 						displayName: 'Resize To',
 						name: 'resizeTo',
 						type: 'options',
-						// eslint-disable-next-line n8n-nodes-base/node-param-options-type-unsorted-items
 						options: [
 							{
 								name: 'Custom Size (Enter Below)',
@@ -535,9 +534,10 @@ export class Orshot implements INodeType {
 								'/operation': ['https://api.orshot.com/v1/studio/render'],
 							},
 						},
-						// 'instagram-story' is inside the spread SIZE_PRESET_OPTIONS, which the lint rule can't see
-						// eslint-disable-next-line n8n-nodes-base/node-param-default-wrong-for-options
-						default: 'instagram-story',
+						// Defaults to the custom-size toggle: with no custom size entered the
+						// design renders at its original size, so adding this option is a no-op
+						// until the user picks a preset or types a size.
+						default: 'custom',
 						description: 'Smart Resize: render this design at a different size. The layout automatically adapts to fit the new dimensions.',
 					},
 					{
@@ -1411,7 +1411,10 @@ export class Orshot implements INodeType {
 				} else {
 					if (error.context) {
 						error.context.itemIndex = itemIndex;
-						throw error;
+						throw new NodeApiError(this.getNode(), error as JsonObject, {
+							itemIndex,
+							message: errorMessage,
+						});
 					}
 					throw new NodeOperationError(this.getNode(), errorMessage, {
 						itemIndex,

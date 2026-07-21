@@ -1,5 +1,6 @@
 import {
 	IAuthenticateGeneric,
+	Icon,
 	ICredentialTestRequest,
 	ICredentialType,
 	INodeProperties,
@@ -8,6 +9,7 @@ import {
 export class OrshotApi implements ICredentialType {
 	name = 'orshotApi';
 	displayName = 'Orshot API';
+	icon: Icon = { light: 'file:orshot.svg', dark: 'file:orshot.dark.svg' };
 	documentationUrl = 'https://orshot.com/docs';
 	properties: INodeProperties[] = [
 		{
