@@ -1,8 +1,8 @@
 # n8n-nodes-orshot
 
-This is an n8n community node. It lets you use [Orshot](https://orshot.com)'s Image Generation API in your n8n workflows.
+This is an n8n community node for [Orshot](https://orshot.com), the API for automated image, PDF and video generation from templates.
 
-Orshot is an Image Generation API which lets you generate dynamic images from pre-designed and AI generated templates via API and Integrations.
+Design a template once in Orshot Studio (or import it from Canva or Figma), then automate image, PDF and video generation from any n8n workflow: pass your data in, get a rendered file or hosted URL back.
 
 [n8n](https://n8n.io/) is a [fair-code licensed](https://docs.n8n.io/reference/license/) workflow automation platform.
 
@@ -20,8 +20,9 @@ Follow the [installation guide](https://docs.n8n.io/integrations/community-nodes
 
 ## Operations
 
-- Generate Images from a Library Template
-- Generate Images from a Orshot Studio Templates
+- Render from a Studio Template: images (PNG, JPG, WebP), PDFs and videos (MP4, WebM, GIF), with Smart Resize, PDF and video options
+- Wait for Completion (Async): render long videos and large PDFs in the background without timeouts
+- Render from a Library Template
 - Publish to Social Media (post or schedule content to your connected social accounts)
 - Get Brand Assets (fetch your workspace brand kit: images, colors, fonts, videos, audio)
 
@@ -50,6 +51,13 @@ You can refer to [Orshot API Docs](https://orshot.com/docs) to refer to the APIs
 - [Integrations](https://orshot.com/integrations)
 
 ## Version history
+
+#### 0.6.3
+
+- Fixed packaging: 0.6.0-0.6.2 were published without compiled code, so their features never reached users. The build now always emits the node and refuses to publish an empty package
+- Added "Wait for Completion (Async)" for studio renders: runs long videos and large PDFs as background jobs and polls until done (off by default)
+- Added PDF image compression options (JPEG re-encode, max DPI, quality)
+- PDF and video options are now sent where the API reads them, so settings like CMYK, DPI, loop and mute take effect
 
 #### 0.6.0
 

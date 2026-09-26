@@ -6,7 +6,7 @@ import type {
 	INodeType,
 	INodeTypeDescription,
 } from 'n8n-workflow';
-import { NodeApiError, NodeConnectionType, NodeOperationError } from 'n8n-workflow';
+import { NodeApiError, NodeConnectionType, NodeOperationError, sleep } from 'n8n-workflow';
 import type { JsonObject } from 'n8n-workflow';
 
 const getMimeType = (format: string): string => {
@@ -80,7 +80,7 @@ export class Orshot implements INodeType {
 			'={{ $parameter["operation"] === "https://api.orshot.com/v1/generate/images" ? "Library Template" : $parameter["operation"] === "https://api.orshot.com/v1/studio/render" ? "Studio Template" : $parameter["operation"] === "brandAssets" ? "Brand Assets" : "Publish to Social Media" }}',
     documentationUrl: 'https://el.orshot.com/n8n-docs',
 		version: [3, 4],
-		description: 'Automated Image Generation for Marketing',
+		description: 'Automate image, PDF and video generation from templates via the Orshot API',
 		defaults: {
 			name: 'Orshot',
 		},
@@ -390,6 +390,40 @@ export class Orshot implements INodeType {
 						description: 'Smart Resize: also render the design at these sizes in the same call. Each output includes an "extraSizes" array with a URL per size. Image and PDF formats only.',
 					},
 					{
+						displayName: 'Async Poll Interval (Seconds)',
+						name: 'asyncPollInterval',
+						type: 'number',
+						typeOptions: {
+							minValue: 2,
+							maxValue: 60,
+						},
+						displayOptions: {
+							show: {
+								'/operation': ['https://api.orshot.com/v1/studio/render'],
+								waitForCompletion: [true],
+							},
+						},
+						default: 5,
+						description: 'How often to check whether the background render has finished',
+					},
+					{
+						displayName: 'Async Timeout (Minutes)',
+						name: 'asyncTimeoutMinutes',
+						type: 'number',
+						typeOptions: {
+							minValue: 1,
+							maxValue: 60,
+						},
+						displayOptions: {
+							show: {
+								'/operation': ['https://api.orshot.com/v1/studio/render'],
+								waitForCompletion: [true],
+							},
+						},
+						default: 15,
+						description: 'Stop waiting and fail the item after this long. The render keeps running and can still be fetched by its job ID.',
+					},
+					{
 						displayName: 'Custom File Name',
 						name: 'customFileName',
 						type: 'string',
@@ -491,6 +525,63 @@ export class Orshot implements INodeType {
 						description: 'Color mode for the PDF output',
 					},
 					{
+						displayName: 'PDF Image Compression',
+						name: 'pdfImageFormat',
+						type: 'options',
+						options: [
+							{
+								name: 'Auto',
+								value: 'auto',
+								description: 'Leave embedded images exactly as the renderer produced them',
+							},
+							{
+								name: 'JPEG',
+								value: 'jpeg',
+								description: 'Re-encode embedded photos as JPEG, usually 80-90% smaller',
+							},
+						],
+						displayOptions: {
+							show: {
+								'/operation': ['https://api.orshot.com/v1/studio/render'],
+								'/responseFormat': ['pdf'],
+							},
+						},
+						default: 'auto',
+						description: 'How embedded images are compressed in the PDF',
+					},
+					{
+						displayName: 'PDF Image Max DPI',
+						name: 'pdfMaxImageDpi',
+						type: 'number',
+						displayOptions: {
+							show: {
+								'/operation': ['https://api.orshot.com/v1/studio/render'],
+								'/responseFormat': ['pdf'],
+								pdfImageFormat: ['jpeg'],
+							},
+						},
+						default: 300,
+						description: 'Downsample embedded images above this resolution. Use 0 to keep the source resolution.',
+					},
+					{
+						displayName: 'PDF Image Quality',
+						name: 'pdfImageQuality',
+						type: 'number',
+						typeOptions: {
+							minValue: 1,
+							maxValue: 100,
+						},
+						displayOptions: {
+							show: {
+								'/operation': ['https://api.orshot.com/v1/studio/render'],
+								'/responseFormat': ['pdf'],
+								pdfImageFormat: ['jpeg'],
+							},
+						},
+						default: 85,
+						description: 'JPEG quality from 1 to 100. 85 is print quality.',
+					},
+					{
 						displayName: 'PDF Margin',
 						name: 'pdfMargin',
 						type: 'string',
@@ -590,6 +681,18 @@ export class Orshot implements INodeType {
 						},
 						default: 0,
 						description: 'Start time in seconds to trim the video',
+					},
+					{
+						displayName: 'Wait for Completion (Async)',
+						name: 'waitForCompletion',
+						type: 'boolean',
+						displayOptions: {
+							show: {
+								'/operation': ['https://api.orshot.com/v1/studio/render'],
+							},
+						},
+						default: false,
+						description: 'Whether to render in the background and wait for the result. Use this for long videos or large multi-page PDFs that would otherwise time out. Requires the URL response type.',
 					},
 				],
 			},
@@ -1220,36 +1323,33 @@ export class Orshot implements INodeType {
 						if (options.pdfMargin) pdfOptions.margin = options.pdfMargin;
 						if (options.pdfColorMode) pdfOptions.colorMode = options.pdfColorMode;
 						if (options.pdfRangeFrom) pdfOptions.rangeFrom = options.pdfRangeFrom;
-						
-						let pdfRangeTo = options.pdfRangeTo as number;
-						
-						// If pdfRangeTo is not set (0), fetch template details to set it to max pages
-						if (!pdfRangeTo || pdfRangeTo === 0) {
-							try {
-								const templatesResponse = await this.helpers.httpRequestWithAuthentication.call(this, 'orshotApi', {
-									method: 'GET',
-									url: 'https://api.orshot.com/v1/studio/templates',
-									headers: {
-										'Content-Type': 'application/json',
-									},
-								});
-								
-								const templates = Array.isArray(templatesResponse) ? templatesResponse : [];
-								// templateId can be string or number, ensure comparison works
-								const currentTemplate = templates.find((t: any) => String(t.id) === String(templateId));
-								
-								if (currentTemplate && currentTemplate.pages_data && Array.isArray(currentTemplate.pages_data)) {
-									pdfRangeTo = currentTemplate.pages_data.length;
-								}
-							} catch (error) {
-								// Ignore error and continue without setting default range
+						if (options.pdfImageFormat && options.pdfImageFormat !== 'auto') {
+							pdfOptions.imageFormat = options.pdfImageFormat;
+							if (options.pdfImageQuality) pdfOptions.imageQuality = options.pdfImageQuality;
+							// 0 is meaningful here (keep source resolution), so check for
+							// undefined rather than truthiness.
+							if (options.pdfMaxImageDpi !== undefined) {
+								pdfOptions.maxImageDpi = options.pdfMaxImageDpi;
 							}
 						}
-						
-						if (pdfRangeTo) pdfOptions.rangeTo = pdfRangeTo;
-						
+
+						// Send rangeTo ONLY when the user set it. This used to auto-fill it
+						// with the template's page count whenever "Page Range From" was set,
+						// which cost a templates fetch on every render and, now that
+						// pdfOptions actually reaches the API, would turn "Page Range From: 2"
+						// into pageRanges "2-N". The studio multi-page path renders one page
+						// per document, so anything but a range starting at 1 fails the whole
+						// render with "Page range exceeds page count". The auto-fill never had
+						// any effect before (the options were dropped), so dropping it changes
+						// nothing users have experienced and keeps this node's behaviour
+						// identical to calling the REST API directly.
+						if (options.pdfRangeTo) pdfOptions.rangeTo = options.pdfRangeTo;
+
 						if (Object.keys(pdfOptions).length > 0) {
-							requestBody.response.pdfOptions = pdfOptions;
+							// pdfOptions is a TOP-LEVEL request field. It was previously nested
+							// under response, where the API never looked for it, so every PDF
+							// option set in n8n was silently discarded.
+							requestBody.pdfOptions = pdfOptions;
 						}
 					}
 					
@@ -1262,22 +1362,90 @@ export class Orshot implements INodeType {
 						if (options.videoTrimEnd) videoOptions.trimEnd = options.videoTrimEnd;
 						
 						if (Object.keys(videoOptions).length > 0) {
-							requestBody.response.videoOptions = videoOptions;
+							// Same top-level placement as pdfOptions above.
+							requestBody.videoOptions = videoOptions;
 						}
 					}
 				}
 
-				// Make the API request with authentication
-				const response = await this.helpers.httpRequestWithAuthentication.call(this, 'orshotApi', {
-					method: 'POST',
-					url: operation,
-					headers: {
-						'Content-Type': 'application/json',
-					},
-					body: requestBody,
-					returnFullResponse: true,
-					encoding: responseType === 'binary' ? 'arraybuffer' : 'text',
-				});
+				// Async mode (opt-in, off by default so existing workflows are untouched):
+				// start a background render job and poll it until it finishes. Avoids
+				// timeouts on long video / large PDF renders.
+				const waitForCompletion =
+					operation === 'https://api.orshot.com/v1/studio/render' && options.waitForCompletion === true;
+				let renderJobId: number | undefined;
+
+				let response: any;
+				if (waitForCompletion) {
+					if (responseType !== 'url') {
+						throw new NodeOperationError(
+							this.getNode(),
+							'"Wait for Completion (Async)" needs Response Type set to "URL". Async renders return hosted URLs.',
+							{ itemIndex },
+						);
+					}
+					requestBody.response.mode = 'async';
+
+					const startResponse = await this.helpers.httpRequestWithAuthentication.call(this, 'orshotApi', {
+						method: 'POST',
+						url: operation,
+						headers: {
+							'Content-Type': 'application/json',
+						},
+						body: requestBody,
+						json: true,
+					});
+					let job: any = startResponse;
+					renderJobId = job?.id;
+					if (!renderJobId) {
+						throw new NodeOperationError(this.getNode(), 'Orshot did not return a render job ID for the async render', {
+							itemIndex,
+						});
+					}
+
+					const pollSeconds = Math.min(Math.max(Number(options.asyncPollInterval) || 5, 2), 60);
+					const timeoutMinutes = Math.min(Math.max(Number(options.asyncTimeoutMinutes) || 15, 1), 60);
+					const deadline = Date.now() + timeoutMinutes * 60 * 1000;
+
+					while (!job?.finished) {
+						if (Date.now() > deadline) {
+							throw new NodeOperationError(
+								this.getNode(),
+								`Render job ${renderJobId} did not finish within ${timeoutMinutes} minutes. It keeps running; fetch it later from GET https://api.orshot.com/v1/studio/render-jobs/${renderJobId}`,
+								{ itemIndex },
+							);
+						}
+						await sleep(pollSeconds * 1000);
+						job = await this.helpers.httpRequestWithAuthentication.call(this, 'orshotApi', {
+							method: 'GET',
+							url: `https://api.orshot.com/v1/studio/render-jobs/${renderJobId}`,
+							json: true,
+						});
+					}
+
+					if (job.status !== 'succeeded') {
+						throw new NodeOperationError(
+							this.getNode(),
+							`Render job ${renderJobId} ${job.status}${job.error ? `: ${job.error}` : ''}${job.error_code ? ` (${job.error_code})` : ''}`,
+							{ itemIndex },
+						);
+					}
+
+					// job.result is the exact body a synchronous render returns.
+					response = { statusCode: 200, body: job.result };
+				} else {
+					// Make the API request with authentication
+					response = await this.helpers.httpRequestWithAuthentication.call(this, 'orshotApi', {
+						method: 'POST',
+						url: operation,
+						headers: {
+							'Content-Type': 'application/json',
+						},
+						body: requestBody,
+						returnFullResponse: true,
+						encoding: responseType === 'binary' ? 'arraybuffer' : 'text',
+					});
+				}
 
 				// Check for successful response
 				if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -1306,6 +1474,9 @@ export class Orshot implements INodeType {
 					statusCode: response.statusCode,
 					modifications: modifications,
 				};
+				if (renderJobId !== undefined) {
+					outputData.renderJobId = renderJobId;
+				}
 
 				// Handle different response types
 				switch (responseType) {

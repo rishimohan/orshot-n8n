@@ -1,12 +1,15 @@
 {
 	"name": "@thelifeofrishi/n8n-nodes-orshot",
-	"version": "0.6.2",
-	"description": "Orshot.com n8n Integration",
+	"version": "0.6.3",
+	"description": "n8n node for Orshot: automate image, PDF and video generation from templates via API",
 	"homepage": "https://orshot.com",
 	"keywords": [
 		"n8n-community-node-package",
 		"image generation",
-		"automated image generation"
+		"automated image generation",
+		"pdf generation",
+		"video generation",
+		"template api"
 	],
 	"license": "MIT",
 	"author": {
@@ -22,7 +25,8 @@
 	},
 	"main": "index.js",
 	"scripts": {
-		"build": "npx rimraf dist && tsc && gulp build:icons",
+		"build": "npx rimraf dist .tsbuildinfo && tsc && gulp build:icons && node scripts/verify-dist.js",
+		"verify:dist": "node scripts/verify-dist.js",
 		"dev": "tsc --watch",
 		"format": "prettier nodes credentials --write",
 		"lint": "eslint nodes credentials package.json",
