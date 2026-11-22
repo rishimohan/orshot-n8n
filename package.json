@@ -1,6 +1,6 @@
 {
 	"name": "@thelifeofrishi/n8n-nodes-orshot",
-	"version": "0.6.3",
+	"version": "0.7.0",
 	"description": "n8n node for Orshot: automate image, PDF and video generation from templates via API",
 	"homepage": "https://orshot.com",
 	"keywords": [
@@ -29,9 +29,9 @@
 		"verify:dist": "node scripts/verify-dist.js",
 		"dev": "tsc --watch",
 		"format": "prettier nodes credentials --write",
-		"lint": "eslint nodes credentials package.json",
-		"lintfix": "eslint nodes credentials package.json --fix",
-		"prepublishOnly": "npm run build && eslint -c .eslintrc.prepublish.js nodes credentials package.json"
+		"lint": "n8n-node lint",
+		"lintfix": "n8n-node lint --fix",
+		"prepublishOnly": "npm run build && npm run lint"
 	},
 	"files": [
 		"dist"
@@ -46,9 +46,9 @@
 		]
 	},
 	"devDependencies": {
-		"@typescript-eslint/parser": "~8.32.0",
-		"eslint": "^8.57.0",
-		"eslint-plugin-n8n-nodes-base": "^1.16.3",
+		"@n8n/node-cli": "^0.57.4",
+		"@types/node": "^20.19.43",
+		"eslint": "9.32.0",
 		"gulp": "^5.0.0",
 		"prettier": "^3.5.3",
 		"typescript": "^5.8.3"

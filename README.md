@@ -36,7 +36,7 @@ Follow the [installation guide](https://docs.n8n.io/integrations/community-nodes
 ## Compatibility
 
 - Works on n8n > 1.00
-- Created on n8n v1.94.1
+- Created on n8n v1.94.1, tested on n8n v2.48.7
 
 ## Usage
 
@@ -51,6 +51,21 @@ You can refer to [Orshot API Docs](https://orshot.com/docs) to refer to the APIs
 - [Integrations](https://orshot.com/integrations)
 
 ## Version history
+
+#### 0.7.0
+
+- Errors now say what Orshot said and what to do next. A refused request used to show n8n's generic "Forbidden - perhaps check your credentials?" or "Bad request"; it now shows the API's own message (out of credits, feature not on the plan, wrong API key, rate limit, template not found) with the fix under it. "Continue On Fail" items carry the same message, status and help link
+- PDF with the Base64 response type returned corrupted data; it now returns the PDF
+- New node version 5: Base64 returns the base64 string itself (a list of pages for multi-page templates) instead of the API response as text. Versions 3 and 4 keep their output, so saved workflows are unchanged
+- From node version 5, Binary output uses "Custom File Name" when it is set
+- "Additional Sizes" with the Binary response type is refused up front with the reason
+- From node version 5, videos render in the background and wait for the result by default, so long videos no longer time out
+- Publish to Social Media: a post that failed on some accounts, or is still publishing, now says so on the item (`failedPlatforms`, `message`)
+- Template and field dropdowns show the API's error text, and untitled templates are listed with their ID
+- The render operations are now named "Render a Library Template" and "Render a Studio Template" (they produce PDFs and videos too, not only images). Saved workflows are unaffected
+- The node can be found in the nodes panel by what it makes: image, pdf, video, certificate, invoice, og image and more
+- Added guidance for n8n's AI workflow builder on when to use the node and how to fill it in
+- Moved to n8n's current community node tooling (`n8n-node lint`); the node still loads on older n8n versions
 
 #### 0.6.3
 
