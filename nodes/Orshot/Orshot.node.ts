@@ -1,13 +1,15 @@
 import type {
+	NodeConnectionType,
+	IDataObject,
 	IExecuteFunctions,
+	IHttpRequestOptions,
 	ILoadOptionsFunctions,
 	INodeExecutionData,
 	INodePropertyOptions,
 	INodeType,
-	INodeTypeDescription,
+	INodeTypeDescription, JsonObject
 } from 'n8n-workflow';
-import { NodeApiError, NodeConnectionType, NodeOperationError, sleep } from 'n8n-workflow';
-import type { JsonObject } from 'n8n-workflow';
+import { NodeApiError, NodeConnectionTypes, NodeOperationError, sleep } from 'n8n-workflow';
 
 const getMimeType = (format: string): string => {
 	const mimeTypes: { [key: string]: string } = {
@@ -60,15 +62,169 @@ const STUDIO_RENDER_OP = 'https://api.orshot.com/v1/studio/render';
 const SOCIAL_PUBLISH_OP = 'socialPublish';
 const BRAND_ASSETS_OP = 'brandAssets';
 
-const parseJsonOption = (value: any): { invalid?: boolean; value?: any } => {
+const parseJsonOption = (value: unknown): { invalid?: boolean; value?: IDataObject } => {
 	if (value === undefined || value === null || value === '') return {};
-	if (typeof value === 'object') return { value };
+	if (typeof value === 'object') return { value: value as IDataObject };
 	try {
 		return { value: JSON.parse(value as string) };
 	} catch {
 		return { invalid: true };
 	}
 };
+
+const VIDEO_FORMATS = ['mp4', 'webm', 'gif'];
+
+// n8n before 1.9x has no NodeConnectionTypes export, and this node still has to
+// load there, so fall back to the value it stands for.
+const MAIN_CONNECTION: NodeConnectionType = NodeConnectionTypes?.Main ?? 'main';
+
+type OrshotContext = IExecuteFunctions | ILoadOptionsFunctions;
+
+// What orshotRequest learned from a refused request, kept on the error for
+// the "Continue On Fail" item.
+type OrshotApiError = NodeApiError & {
+	orshot?: { status: number; code?: string; helpUrl: string; hint: string };
+};
+
+// The response body as text, whatever the transport handed back (a Buffer or
+// ArrayBuffer for renders, a string or parsed object elsewhere).
+const bodyToText = (body: unknown): string => {
+	if (body === undefined || body === null) return '';
+	if (typeof body === 'string') return body;
+	if (Buffer.isBuffer(body)) return body.toString('utf8');
+	if (body instanceof ArrayBuffer) return Buffer.from(body).toString('utf8');
+	try {
+		return JSON.stringify(body);
+	} catch {
+		return '';
+	}
+};
+
+// API payloads are JSON of a shape this file reads field by field.
+const asObject = (value: unknown): IDataObject =>
+	value && typeof value === 'object' && !Array.isArray(value) ? (value as IDataObject) : {};
+
+const asList = (value: unknown): IDataObject[] =>
+	Array.isArray(value) ? (value as IDataObject[]) : [];
+
+const bodyToJson = (body: unknown): unknown => {
+	if (body && typeof body === 'object' && !Buffer.isBuffer(body) && !(body instanceof ArrayBuffer)) {
+		return body;
+	}
+	try {
+		return JSON.parse(bodyToText(body));
+	} catch {
+		return undefined;
+	}
+};
+
+const bodyToBuffer = (body: unknown): Buffer => {
+	if (Buffer.isBuffer(body)) return body;
+	if (body instanceof ArrayBuffer) return Buffer.from(body);
+	return Buffer.from(bodyToText(body), 'utf8');
+};
+
+const stripDataUri = (content: unknown): string => {
+	const text = typeof content === 'string' ? content : '';
+	return text.startsWith('data:') ? text.slice(text.indexOf(',') + 1) : text;
+};
+
+// What the person can do about a refused request. The API's own sentence is the
+// error message; this is the line under it.
+const TIMEOUT_STATUSES = [408, 502, 503, 504, 520, 522, 524];
+
+const errorHint = (
+	status: number,
+	apiMessage: string,
+	isRender: boolean,
+	hasApiMessage: boolean,
+): string => {
+	const text = apiMessage.toLowerCase();
+	if (status === 429) {
+		return 'Too many requests in a short time. Add a Wait node between items or lower the batch size, then run again.';
+	}
+	if (status === 401 || text.includes('api key')) {
+		return 'Check the API key saved in this node\'s Orshot credential. Copy a key from your Orshot workspace settings, and make sure it belongs to the workspace that owns the template.';
+	}
+	if (text.includes('credit') || text.includes('render limit')) {
+		return 'This workspace has used its credits for the period. Renders work again when the credits reset, or right away on a bigger plan: https://orshot.com/pricing';
+	}
+	if (text.includes('supported plans')) {
+		return 'This feature is not part of the workspace\'s current plan. See https://orshot.com/pricing';
+	}
+	// The API answers a missing template with 403 or 400 as well as 404.
+	if (status === 404 || (text.includes('template') && text.includes('not found'))) {
+		return 'Check the template selected in this node. It may have been deleted, or it belongs to a different workspace than the API key.';
+	}
+	if (TIMEOUT_STATUSES.includes(status)) {
+		return isRender
+			? 'The render took longer than a single request allows. Under Options, turn on "Wait for Completion (Async)" and set Response Type to URL, then run again.'
+			: 'Orshot did not answer in time. Run the node again in a moment.';
+	}
+	// A 5xx that arrives with Orshot's own sentence already says what failed.
+	if (status >= 500 && !hasApiMessage) {
+		return 'Orshot hit an error on its side. Run the node again; if it keeps failing, contact support at https://orshot.com/contact';
+	}
+	return '';
+};
+
+/**
+ * Every call to the Orshot API goes through here. n8n's request helper throws
+ * on a 4xx/5xx with its own generic text ("Forbidden - perhaps check your
+ * credentials?") and drops the response body, which is where Orshot says what
+ * went wrong ("free credits for this month reached", "Video generation is
+ * available on supported plans"). So read the status ourselves and raise the
+ * API's sentence, plus what to do about it.
+ */
+async function orshotRequest(
+	ctx: OrshotContext,
+	requestOptions: IHttpRequestOptions,
+	extra: { itemIndex?: number; isRender?: boolean } = {},
+): Promise<{ statusCode: number; body: unknown; headers: IDataObject }> {
+	const response = await ctx.helpers.httpRequestWithAuthentication.call(ctx, 'orshotApi', {
+		...requestOptions,
+		returnFullResponse: true,
+		ignoreHttpStatusErrors: true,
+	});
+
+	const statusCode = Number(response?.statusCode) || 0;
+	if (statusCode >= 200 && statusCode < 300) {
+		return { statusCode, body: response.body, headers: (response.headers || {}) as IDataObject };
+	}
+
+	const parsed = bodyToJson(response?.body);
+	const apiError = asObject(parsed);
+	// Social refusals carry a short `error` and the full sentence in `message`.
+	const apiText = [apiError.error, apiError.message]
+		.filter((part) => typeof part === 'string' && part)
+		.join('. ');
+	const apiMessage =
+		apiText ||
+		(TIMEOUT_STATUSES.includes(statusCode)
+			? `Orshot did not finish the request in time (HTTP ${statusCode})`
+			: `Orshot returned HTTP ${statusCode} with no explanation`);
+	const hint = errorHint(statusCode, apiMessage, extra.isRender === true, Boolean(apiText));
+	const helpUrl = typeof apiError.helpUrl === 'string' ? apiError.helpUrl : '';
+	const description = [hint, helpUrl ? `Details: ${helpUrl}` : ''].filter(Boolean).join(' ');
+
+	const error = new NodeApiError(
+		ctx.getNode(),
+		{
+			message: apiMessage,
+			httpStatus: statusCode,
+			...(apiError.code ? { code: apiError.code } : {}),
+			...(helpUrl ? { helpUrl } : {}),
+		} as JsonObject,
+		{
+			message: apiMessage,
+			description: description || undefined,
+			httpCode: String(statusCode),
+			itemIndex: extra.itemIndex,
+		},
+	);
+	(error as OrshotApiError).orshot = { status: statusCode, code: apiError.code as string | undefined, helpUrl, hint };
+	throw error;
+}
 
 export class Orshot implements INodeType {
 	description: INodeTypeDescription = {
@@ -79,14 +235,19 @@ export class Orshot implements INodeType {
 		subtitle:
 			'={{ $parameter["operation"] === "https://api.orshot.com/v1/generate/images" ? "Library Template" : $parameter["operation"] === "https://api.orshot.com/v1/studio/render" ? "Studio Template" : $parameter["operation"] === "brandAssets" ? "Brand Assets" : "Publish to Social Media" }}',
     documentationUrl: 'https://el.orshot.com/n8n-docs',
-		version: [3, 4],
+		version: [3, 4, 5],
 		description: 'Automate image, PDF and video generation from templates via the Orshot API',
 		defaults: {
 			name: 'Orshot',
 		},
-		inputs: [NodeConnectionType.Main],
-		outputs: [NodeConnectionType.Main],
+		inputs: [MAIN_CONNECTION],
+		outputs: [MAIN_CONNECTION],
 		usableAsTool: true,
+		// Read by n8n's AI workflow builder when it picks and configures nodes.
+		builderHint: {
+			searchHint:
+				'Use Orshot to turn data into a finished image, PDF or video from a reusable template: social posts, ad creatives, certificates, invoices, reports and video clips. Pick "Render a Studio Template" for a template the user designed (it supports video and multi-page output) and "Render a Library Template" for a ready-made one. The values that change per run go under Modifications, one entry per dynamic field of the template. Set Response Type to URL when the next node needs a link (posting to social media, sending in an email or chat message) and Binary when it needs the file itself (upload or attachment nodes). "Publish to Social Media" posts a rendered URL to the social accounts connected in Orshot.',
+		},
 		credentials: [
 			{
 				name: 'orshotApi',
@@ -101,16 +262,16 @@ export class Orshot implements INodeType {
         noDataExpression: true,
 				default: 'https://api.orshot.com/v1/generate/images',
         options: [{
-          name: 'Generate Image From a Library Template',
+          name: 'Render a Library Template',
           value: 'https://api.orshot.com/v1/generate/images',
-          description: 'Render a pre-designed template from the Orshot library',
-          action: 'Generate an image from a library template',
+          description: 'Generate an image or PDF from a ready-made template in the Orshot library',
+          action: 'Render a library template',
         },
         {
-          name: 'Generate Image From an Orshot Studio Template',
+          name: 'Render a Studio Template',
           value: 'https://api.orshot.com/v1/studio/render',
-          description: 'Render a template you designed in Orshot Studio',
-          action: 'Generate an image from a studio template',
+          description: 'Generate an image, PDF or video from a template you designed in Orshot Studio',
+          action: 'Render a studio template',
         },
         {
           name: 'Get Brand Assets',
@@ -157,6 +318,11 @@ export class Orshot implements INodeType {
         },
 				default: '',
 				required: true,
+				builderHint: {
+					propertyHint:
+						'The ID of a template in the user\'s Orshot workspace. Ask the user which template to render; never invent an ID.',
+					placeholderSupported: true,
+				},
 				description: 'Select the studio template to render from. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
 			},
 			{
@@ -692,7 +858,7 @@ export class Orshot implements INodeType {
 							},
 						},
 						default: false,
-						description: 'Whether to render in the background and wait for the result. Use this for long videos or large multi-page PDFs that would otherwise time out. Requires the URL response type.',
+						description: 'Whether to render in the background and wait for the result. Use this for long videos or large multi-page PDFs that would otherwise time out. Requires the URL response type. Videos render this way by default; switch it off to render a video in a single request.',
 					},
 				],
 			},
@@ -940,19 +1106,15 @@ export class Orshot implements INodeType {
 			loadOptions: {
 				async getTemplates(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
 					try {
-						const response = await this.helpers.httpRequestWithAuthentication.call(this, 'orshotApi', {
+						const { body: response } = await orshotRequest(this, {
 							method: 'GET',
 							url: 'https://api.orshot.com/v1/templates',
-							headers: {
-								'Content-Type': 'application/json',
-							},
+							json: true,
 						});
 
-						const templates = Array.isArray(response) ? response : [];
-
-						return templates.map((template: any) => ({
-							name: `${template.title}`,
-							value: template.id,
+						return asList(response).map((template: IDataObject) => ({
+							name: `${template.title || template.id}`,
+							value: template.id as string | number,
 							description: `ID: ${template.id}`,
 						}));
 					} catch (error) {
@@ -963,28 +1125,26 @@ export class Orshot implements INodeType {
 					try {
 						// Paginated endpoint — aggregate all pages so every template
 						// shows up in the dropdown (40 per page, hard cap 50 pages)
-						const templates: any[] = [];
+						const templates: IDataObject[] = [];
 						let page = 1;
 						while (page <= 50) {
-							const response = await this.helpers.httpRequestWithAuthentication.call(this, 'orshotApi', {
+							const { body: response } = await orshotRequest(this, {
 								method: 'GET',
 								url: `https://api.orshot.com/v1/studio/templates/all?page=${page}&limit=40`,
-								headers: {
-									'Content-Type': 'application/json',
-								},
+								json: true,
 							});
 
-							const pageTemplates = Array.isArray(response?.data) ? response.data : [];
+							const pageTemplates = asList(asObject(response).data);
 							templates.push(...pageTemplates);
 
-							const totalPages = response?.pagination?.totalPages || 1;
+							const totalPages = Number(asObject(asObject(response).pagination).totalPages) || 1;
 							if (page >= totalPages || pageTemplates.length === 0) break;
 							page++;
 						}
 
-						return templates.map((template: any) => ({
-							name: `${template.name}`,
-							value: template.id,
+						return templates.map((template: IDataObject) => ({
+							name: `${template.name || `Untitled template (${template.id})`}`,
+							value: template.id as string | number,
 							description: `ID: ${template.id}`,
 						}));
 					} catch (error) {
@@ -999,40 +1159,35 @@ export class Orshot implements INodeType {
 						}
 
 						// First try to get template details from the templates endpoint
-						const templatesResponse = await this.helpers.httpRequestWithAuthentication.call(this, 'orshotApi', {
+						const { body: templatesResponse } = await orshotRequest(this, {
 							method: 'GET',
 							url: 'https://api.orshot.com/v1/templates',
-							headers: {
-								'Content-Type': 'application/json',
-							},
+							json: true,
 						});
 
-						const templates = Array.isArray(templatesResponse) ? templatesResponse : [];
-						const selectedTemplate = templates.find((template: any) => template.id === templateId);
+						const selectedTemplate = asList(templatesResponse).find(
+							(template: IDataObject) => template.id === templateId,
+						);
 
 						if (selectedTemplate && selectedTemplate.modifications) {
-							return selectedTemplate.modifications.map((modification: any) => ({
-								name: modification.key,
-								value: modification.key,
-								description: modification.description || '',
+							return asList(selectedTemplate.modifications).map((modification: IDataObject) => ({
+								name: `${modification.key}`,
+								value: modification.key as string | number,
+								description: `${modification.description || ''}`,
 							}));
 						}
 
 						// Fallback to modifications endpoint if template doesn't have modifications
-						const response = await this.helpers.httpRequestWithAuthentication.call(this, 'orshotApi', {
+						const { body: response } = await orshotRequest(this, {
 							method: 'GET',
-							url: `https://api.orshot.com/v1/templates/modifications?template_id=${templateId}`,
-							headers: {
-								'Content-Type': 'application/json',
-							},
+							url: `https://api.orshot.com/v1/templates/modifications?templateId=${encodeURIComponent(templateId)}`,
+							json: true,
 						});
 
-						const modifications = Array.isArray(response) ? response : [];
-
-						return modifications.map((modification: any) => ({
-							name: modification.key,
-							value: modification.key,
-							description: modification.description || '',
+						return asList(response).map((modification: IDataObject) => ({
+							name: `${modification.key}`,
+							value: modification.key as string | number,
+							description: `${modification.description || ''}`,
 						}));
 					} catch (error) {
 						// Return empty array instead of throwing error to avoid breaking the UI
@@ -1048,25 +1203,21 @@ export class Orshot implements INodeType {
 							return [];
 						}
 
-						const response = await this.helpers.httpRequestWithAuthentication.call(this, 'orshotApi', {
+						const { body: response } = await orshotRequest(this, {
 							method: 'GET',
-							url: `https://api.orshot.com/v1/studio/template/modifications?templateId=${templateId}`,
-							headers: {
-								'Content-Type': 'application/json',
-							},
+							url: `https://api.orshot.com/v1/studio/template/modifications?templateId=${encodeURIComponent(templateId)}`,
+							json: true,
 						});
 
-						const modifications = Array.isArray(response) ? response : [];
-
-						return modifications.map((modification: any) => {
+						return asList(response).map((modification: IDataObject) => {
 							// Show the param's current/default value as the subtitle —
 							// far more recognizable than a generic type description
 							const example = `${modification.example ?? ''}`.replace(/\s+/g, ' ').trim();
 							const preview = example.length > 60 ? `${example.slice(0, 57)}...` : example;
 							return {
-								name: modification.id,
-								value: modification.id,
-								description: preview ? `Default: ${preview}` : modification.description || '',
+								name: `${modification.id}`,
+								value: modification.id as string | number,
+								description: preview ? `Default: ${preview}` : `${modification.description || ''}`,
 							};
 						});
 					} catch (error) {
@@ -1079,15 +1230,13 @@ export class Orshot implements INodeType {
 				},
 				async getSocialAccounts(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
 					try {
-						const response = await this.helpers.httpRequestWithAuthentication.call(this, 'orshotApi', {
+						const { body: response } = await orshotRequest(this, {
 							method: 'GET',
 							url: 'https://api.orshot.com/v1/social/accounts',
-							headers: {
-								'Content-Type': 'application/json',
-							},
+							json: true,
 						});
 
-						const accounts = Array.isArray(response?.data) ? response.data : [];
+						const accounts = asList(asObject(response).data);
 
 						if (accounts.length === 0) {
 							return [{
@@ -1096,17 +1245,18 @@ export class Orshot implements INodeType {
 							}];
 						}
 
-						return accounts.map((account: any) => {
-							const platform = account.platform
-								? account.platform.charAt(0).toUpperCase() + account.platform.slice(1)
+						return accounts.map((account: IDataObject) => {
+							const platformName = `${account.platform || ''}`;
+							const platform = platformName
+								? platformName.charAt(0).toUpperCase() + platformName.slice(1)
 								: 'Account';
 							const handle = account.account_username
 								? `@${account.account_username}`
 								: account.account_name || account.id;
 							return {
 								name: `${platform}: ${handle}`,
-								value: account.id,
-								description: account.account_name || '',
+								value: account.id as string | number,
+								description: `${account.account_name || ''}`,
 							};
 						});
 					} catch (error) {
@@ -1141,14 +1291,14 @@ export class Orshot implements INodeType {
 					const content = this.getNodeParameter('socialContent', itemIndex, '') as string;
 					const mediaUrlsRaw = this.getNodeParameter('socialMediaUrls', itemIndex, '') as string;
 					const scheduledFor = this.getNodeParameter('socialScheduledFor', itemIndex, '') as string;
-					const socialOptions = this.getNodeParameter('socialOptions', itemIndex, {}) as any;
+					const socialOptions = this.getNodeParameter('socialOptions', itemIndex, {}) as IDataObject;
 
 					const mediaUrls = mediaUrlsRaw
 						.split(',')
 						.map((url: string) => url.trim())
 						.filter((url: string) => url !== '');
 
-					const body: any = { accounts };
+					const body: IDataObject = { accounts };
 					if (content) body.content = content;
 					if (mediaUrls.length > 0) body.media_urls = mediaUrls;
 					if (scheduledFor) {
@@ -1167,18 +1317,57 @@ export class Orshot implements INodeType {
 					}
 					if (tiktokSettings.value !== undefined) body.tiktokSettings = tiktokSettings.value;
 
-					const publishResponse = await this.helpers.httpRequestWithAuthentication.call(this, 'orshotApi', {
-						method: 'POST',
-						url: 'https://api.orshot.com/v1/social/publish',
-						headers: {
-							'Content-Type': 'application/json',
+					const { body: publishResponse } = await orshotRequest(
+						this,
+						{
+							method: 'POST',
+							url: 'https://api.orshot.com/v1/social/publish',
+							body,
+							json: true,
 						},
-						body,
-					});
+						{ itemIndex },
+					);
 
-					const publishData = publishResponse?.data ?? publishResponse;
+					const publishBody = asObject(publishResponse);
+					const publishData = publishBody.data ?? publishResponse;
+					const publishJson: IDataObject =
+						publishData && typeof publishData === 'object'
+							? { ...(publishData as IDataObject) }
+							: { data: publishData as IDataObject };
+
+					// A post can go out on some accounts and fail on others ("partial"), or
+					// still be publishing when Orshot answers ("processing"). Neither is an
+					// error to retry (a retry would post twice), so say it on the item where
+					// the next node can branch on it.
+					const failedPlatforms = asList(publishJson.platforms).filter(
+						(entry: IDataObject) => entry?.status === 'failed' || entry?.error,
+					);
+					if (failedPlatforms.length > 0) {
+						publishJson.failedPlatforms = failedPlatforms.map((entry: IDataObject) => ({
+							platform: entry.platform,
+							error: entry.error || 'Publishing failed',
+						}));
+						publishJson.message = `Not published on ${failedPlatforms
+							.map((entry: IDataObject) => entry.platform)
+							.filter(Boolean)
+							.join(', ')}. The other accounts are done, so do not run this item again; fix the failed account in Orshot and republish the post there.`;
+					} else if (publishJson.status === 'processing') {
+						publishJson.message =
+							(typeof publishBody.message === 'string' && publishBody.message) ||
+							'Still publishing. Check the post in Orshot in a minute; do not publish it again.';
+					}
+
+					// Show it in the editor too, where a 200 would otherwise read as done.
+					if (typeof publishJson.message === 'string' && typeof this.addExecutionHints === 'function') {
+						this.addExecutionHints({
+							message: publishJson.message,
+							type: 'warning',
+							location: 'outputPane',
+						});
+					}
+
 					returnData.push({
-						json: publishData && typeof publishData === 'object' ? publishData : { data: publishData },
+						json: publishJson,
 						pairedItem: itemIndex,
 					});
 					continue;
@@ -1193,18 +1382,20 @@ export class Orshot implements INodeType {
 
 					const assetResults = await Promise.all(
 						assetTypes.map(async (type: string) => {
-							const assetResponse = await this.helpers.httpRequestWithAuthentication.call(this, 'orshotApi', {
-								method: 'GET',
-								url: `https://api.orshot.com/v1/brand-assets/${type}/get${query}`,
-								headers: {
-									'Content-Type': 'application/json',
+							const { body: assetResponse } = await orshotRequest(
+								this,
+								{
+									method: 'GET',
+									url: `https://api.orshot.com/v1/brand-assets/${type}/get${query}`,
+									json: true,
 								},
-							});
-							return { type, data: assetResponse?.data ?? assetResponse };
+								{ itemIndex },
+							);
+							return { type, data: (asObject(assetResponse).data ?? assetResponse) as IDataObject };
 						}),
 					);
 
-					const assets: any = {};
+					const assets: IDataObject = {};
 					for (const result of assetResults) {
 						assets[result.type] = result.data;
 					}
@@ -1227,48 +1418,49 @@ export class Orshot implements INodeType {
 				const responseFormat = this.getNodeParameter('responseFormat', itemIndex, '') as string;
 				
 				let responseType: string;
-				if (['mp4', 'webm', 'gif'].includes(responseFormat)) {
+				const isVideoFormat = VIDEO_FORMATS.includes(responseFormat);
+				const nodeVersion = this.getNode().typeVersion;
+				if (isVideoFormat) {
 					responseType = 'url';
 				} else {
 					responseType = this.getNodeParameter('responseType', itemIndex, '') as string;
 				}
 				
 				// Get the modifications from the correct parameter based on operation
-				let modificationsData: any;
+				let modificationsData: IDataObject;
 				if (operation === 'https://api.orshot.com/v1/generate/images') {
-					modificationsData = this.getNodeParameter('libraryModifications', itemIndex, {}) as any;
+					modificationsData = this.getNodeParameter('libraryModifications', itemIndex, {}) as IDataObject;
 				} else {
-					modificationsData = this.getNodeParameter('studioModifications', itemIndex, {}) as any;
+					modificationsData = this.getNodeParameter('studioModifications', itemIndex, {}) as IDataObject;
 				}
 
 				// Convert fixedCollection format to object
-				let modifications: any = {};
-				if (modificationsData.modification && Array.isArray(modificationsData.modification)) {
-					modificationsData.modification.forEach((mod: any) => {
-						if (mod.key && mod.value !== undefined && mod.value !== '') {
-							modifications[mod.key] = mod.value;
-						}
-					});
-				}
+				const modifications: IDataObject = {};
+				asList(modificationsData.modification).forEach((mod: IDataObject) => {
+					if (mod.key && mod.value !== undefined && mod.value !== '') {
+						modifications[`${mod.key}`] = mod.value;
+					}
+				});
 
 				// Prepare the request body
-				const requestBody: any = {
+				const responseSpec: IDataObject = {
+					format: responseFormat,
+					type: responseType,
+				};
+				const requestBody: IDataObject = {
 					templateId,
 					modifications,
 					source: 'n8n-integration',
-					response: {
-						format: responseFormat,
-						type: responseType,
-					},
+					response: responseSpec,
 				};
 				
 				// Get collection options
-				const options = this.getNodeParameter('options', itemIndex, {}) as any;
+				const options = this.getNodeParameter('options', itemIndex, {}) as IDataObject;
 
 				// Add scale parameter (works for both library and studio templates)
 				const scale = options.scale as number;
 				if (scale && scale !== 1) {
-					requestBody.response.scale = scale;
+					responseSpec.scale = scale;
 				}
 
 				// Add studio-specific parameters
@@ -1281,7 +1473,7 @@ export class Orshot implements INodeType {
 					const resizeSize =
 						resizeTo === 'custom' ? ((options.resizeCustomSize as string) || '').trim() : resizeTo;
 					if (resizeSize) {
-						requestBody.response.size = resizeSize;
+						responseSpec.size = resizeSize;
 					}
 
 					// Smart Resize: additional sizes (response.extraSizes) — image/PDF only.
@@ -1294,12 +1486,23 @@ export class Orshot implements INodeType {
 						.map((size: string) => size.trim())
 						.filter((size: string) => size !== '');
 					const allExtraSizes = [...extraSizePresets, ...extraCustomSizes];
-					if (allExtraSizes.length > 0 && !['mp4', 'webm', 'gif'].includes(responseFormat)) {
-						requestBody.response.extraSizes = allExtraSizes;
+					if (allExtraSizes.length > 0 && !isVideoFormat) {
+						if (responseType === 'binary') {
+							throw new NodeOperationError(
+								this.getNode(),
+								'"Additional Sizes" cannot be returned as Binary',
+								{
+									itemIndex,
+									description:
+										'A binary response holds one file, and Additional Sizes produces several. Set Response Type to URL (or Base64), or remove Additional Sizes.',
+								},
+							);
+						}
+						responseSpec.extraSizes = allExtraSizes;
 					}
 
 					if (customFileName && (responseType === 'url' || responseType === 'binary')) {
-						requestBody.response.fileName = customFileName;
+						responseSpec.fileName = customFileName;
 					}
 
 					if (includePages && includePages.trim() !== '') {
@@ -1312,13 +1515,13 @@ export class Orshot implements INodeType {
 							.filter((p: number) => !isNaN(p) && p > 0);
 						
 						if (pageNumbers.length > 0) {
-							requestBody.response.includePages = pageNumbers;
+							responseSpec.includePages = pageNumbers;
 						}
 					}
 
 					// Process PDF Options
 					if (responseFormat === 'pdf') {
-						const pdfOptions: any = {};
+						const pdfOptions: IDataObject = {};
 						if (options.pdfDpi) pdfOptions.dpi = options.pdfDpi;
 						if (options.pdfMargin) pdfOptions.margin = options.pdfMargin;
 						if (options.pdfColorMode) pdfOptions.colorMode = options.pdfColorMode;
@@ -1354,8 +1557,8 @@ export class Orshot implements INodeType {
 					}
 					
 					// Process Video Options
-					if (['mp4', 'webm', 'gif'].includes(responseFormat)) {
-						const videoOptions: any = {};
+					if (isVideoFormat) {
+						const videoOptions: IDataObject = {};
 						if (options.videoLoop) videoOptions.loop = options.videoLoop;
 						if (options.videoMuted) videoOptions.muted = options.videoMuted;
 						if (options.videoTrimStart) videoOptions.trimStart = options.videoTrimStart;
@@ -1371,11 +1574,16 @@ export class Orshot implements INodeType {
 				// Async mode (opt-in, off by default so existing workflows are untouched):
 				// start a background render job and poll it until it finishes. Avoids
 				// timeouts on long video / large PDF renders.
+				// From node version 5, a video renders this way unless the option is
+				// explicitly switched off: videos are the renders that outlast a single
+				// request, and a timed-out request loses a render that still finished.
 				const waitForCompletion =
-					operation === 'https://api.orshot.com/v1/studio/render' && options.waitForCompletion === true;
+					operation === 'https://api.orshot.com/v1/studio/render' &&
+					(options.waitForCompletion === true ||
+						(nodeVersion >= 5 && isVideoFormat && options.waitForCompletion !== false));
 				let renderJobId: number | undefined;
 
-				let response: any;
+				let response: { statusCode: number; body: unknown; headers: IDataObject };
 				if (waitForCompletion) {
 					if (responseType !== 'url') {
 						throw new NodeOperationError(
@@ -1384,19 +1592,20 @@ export class Orshot implements INodeType {
 							{ itemIndex },
 						);
 					}
-					requestBody.response.mode = 'async';
+					responseSpec.mode = 'async';
 
-					const startResponse = await this.helpers.httpRequestWithAuthentication.call(this, 'orshotApi', {
-						method: 'POST',
-						url: operation,
-						headers: {
-							'Content-Type': 'application/json',
+					const { body: startResponse } = await orshotRequest(
+						this,
+						{
+							method: 'POST',
+							url: operation,
+							body: requestBody,
+							json: true,
 						},
-						body: requestBody,
-						json: true,
-					});
-					let job: any = startResponse;
-					renderJobId = job?.id;
+						{ itemIndex, isRender: true },
+					);
+					let job = asObject(startResponse);
+					renderJobId = typeof job.id === 'number' ? job.id : undefined;
 					if (!renderJobId) {
 						throw new NodeOperationError(this.getNode(), 'Orshot did not return a render job ID for the async render', {
 							itemIndex,
@@ -1416,58 +1625,50 @@ export class Orshot implements INodeType {
 							);
 						}
 						await sleep(pollSeconds * 1000);
-						job = await this.helpers.httpRequestWithAuthentication.call(this, 'orshotApi', {
-							method: 'GET',
-							url: `https://api.orshot.com/v1/studio/render-jobs/${renderJobId}`,
-							json: true,
-						});
+						const polled = await orshotRequest(
+							this,
+							{
+								method: 'GET',
+								url: `https://api.orshot.com/v1/studio/render-jobs/${renderJobId}`,
+								json: true,
+							},
+							{ itemIndex, isRender: true },
+						);
+						job = asObject(polled.body);
 					}
 
 					if (job.status !== 'succeeded') {
 						throw new NodeOperationError(
 							this.getNode(),
-							`Render job ${renderJobId} ${job.status}${job.error ? `: ${job.error}` : ''}${job.error_code ? ` (${job.error_code})` : ''}`,
-							{ itemIndex },
+							job.error ? `${job.error}` : `Render job ${renderJobId} ${job.status}`,
+							{
+								itemIndex,
+								description: `Render job ${renderJobId} ended as "${job.status}"${job.error_code ? ` (${job.error_code})` : ''}. Open the template in Orshot Studio to check it renders there, then run again.`,
+							},
 						);
 					}
 
 					// job.result is the exact body a synchronous render returns.
-					response = { statusCode: 200, body: job.result };
+					response = { statusCode: 200, body: job.result, headers: {} };
 				} else {
-					// Make the API request with authentication
-					response = await this.helpers.httpRequestWithAuthentication.call(this, 'orshotApi', {
-						method: 'POST',
-						url: operation,
-						headers: {
-							'Content-Type': 'application/json',
+					// Always read the body as bytes: a PDF comes back as the file itself
+					// whatever Response Type asks for, and reading that as text corrupts it.
+					response = await orshotRequest(
+						this,
+						{
+							method: 'POST',
+							url: operation,
+							headers: {
+								'Content-Type': 'application/json',
+							},
+							body: requestBody,
+							encoding: 'arraybuffer',
 						},
-						body: requestBody,
-						returnFullResponse: true,
-						encoding: responseType === 'binary' ? 'arraybuffer' : 'text',
-					});
+						{ itemIndex, isRender: true },
+					);
 				}
 
-				// Check for successful response
-				if (response.statusCode < 200 || response.statusCode >= 300) {
-					let errorMessage = `API request failed with status ${response.statusCode}`;
-					
-					// Try to extract error message from response body
-					try {
-						const errorBody = typeof response.body === 'string' ? JSON.parse(response.body) : response.body;
-						if (errorBody && errorBody.error) {
-							errorMessage += `: ${errorBody.error}`;
-						} else if (errorBody && errorBody.message) {
-							errorMessage += `: ${errorBody.message}`;
-						}
-					} catch {
-						// If we can't parse the error body, just use the status code
-						errorMessage += `: ${response.body || 'Unknown error'}`;
-					}
-					
-					throw new NodeOperationError(this.getNode(), errorMessage, { itemIndex });
-				}
-
-				let outputData: any = {
+				const outputData: IDataObject = {
 					templateId,
 					responseType,
 					responseFormat,
@@ -1478,20 +1679,72 @@ export class Orshot implements INodeType {
 					outputData.renderJobId = renderJobId;
 				}
 
+				const contentType = `${response.headers?.['content-type'] ?? ''}`.toLowerCase();
+				const isFileBody = !contentType.includes('json') && Boolean(contentType);
+
 				// Handle different response types
 				switch (responseType) {
-					case 'base64':
-						outputData.data = response.body;
-						outputData.mimeType = getMimeType(responseFormat);
+					case 'base64': {
+						const mimeType = getMimeType(responseFormat);
+						outputData.mimeType = mimeType;
+
+						if (isFileBody) {
+							// PDF: the API answers with the file, not JSON.
+							const fileBase64 = bodyToBuffer(response.body).toString('base64');
+							outputData.data =
+								nodeVersion >= 5
+									? fileBase64
+									: JSON.stringify({
+											data: {
+												content: `data:${mimeType};base64,${fileBase64}`,
+												format: responseFormat,
+												type: responseType,
+											},
+										});
+							break;
+						}
+
+						if (nodeVersion < 5) {
+							// Versions 3 and 4 always returned the API's JSON as text here;
+							// saved workflows parse it, so it stays.
+							outputData.data = bodyToText(response.body);
+							break;
+						}
+
+						// Version 5: the base64 string itself, as the option says.
+						const parsedBody = bodyToJson(response.body);
+						const rendered = asObject(parsedBody).data;
+						if (Array.isArray(rendered)) {
+							outputData.data = asList(rendered).map((page: IDataObject) => ({
+								page: page.page,
+								data: stripDataUri(page.content),
+								...(page.filename ? { fileName: page.filename } : {}),
+							}));
+							outputData.totalPages = rendered.length;
+						} else if (rendered && typeof rendered === 'object') {
+							const { content, filename, ...details } = rendered as IDataObject;
+							outputData.data = stripDataUri(content);
+							if (filename) outputData.fileName = filename;
+							if (Object.keys(details).length > 0) outputData.details = details;
+						} else {
+							outputData.data = bodyToText(response.body);
+						}
 						break;
-					case 'binary':
+					}
+					case 'binary': {
 						// Use prepareBinaryData for proper binary handling
+						// Version 5 only: earlier versions always named the file
+						// "orshot-image", and saved workflows may look for that name.
+						const customBinaryName =
+							nodeVersion >= 5 && operation === STUDIO_RENDER_OP
+								? `${options.customFileName ?? ''}`.trim()
+								: '';
 						const binaryData = await this.helpers.prepareBinaryData(
-							response.body as ArrayBuffer,
-							`orshot-image.${responseFormat}`,
+							bodyToBuffer(response.body),
+							`${customBinaryName || 'orshot-image'}.${responseFormat}`,
 							getMimeType(responseFormat)
 						);
-						
+
 						returnData.push({
 							json: {
 								templateId,
@@ -1506,20 +1759,13 @@ export class Orshot implements INodeType {
 							pairedItem: itemIndex,
 						});
 						continue; // Skip the regular returnData.push below
+					}
 					case 'url':
-						// For URL response, parse the JSON if it's a string
-						let urlData = response.body;
-						if (typeof response.body === 'string') {
-							try {
-								urlData = JSON.parse(response.body);
-							} catch {
-								// If parsing fails, keep as string
-							}
-						}
-						outputData.data = urlData;
+						// URL responses are JSON; async renders already hand over an object.
+						outputData.data = bodyToJson(response.body) ?? bodyToText(response.body);
 						break;
 					default:
-						outputData.data = response.body;
+						outputData.data = bodyToText(response.body);
 				}
 
 				returnData.push({
@@ -1529,7 +1775,7 @@ export class Orshot implements INodeType {
 
 			} catch (error) {
 				// Enhanced error handling
-				let errorMessage = error.message || 'Unknown error occurred';
+				const errorMessage = error.message || 'Unknown error occurred';
 				const operation = this.getNodeParameter('operation', itemIndex, '') as string;
 				
 				// Get the correct templateId based on the operation
@@ -1540,56 +1786,43 @@ export class Orshot implements INodeType {
 					templateId = this.getNodeParameter('studioTemplateId', itemIndex, '') as string;
 				}
 				
-				let errorDetails: any = {
+				const errorDetails: IDataObject = {
 					templateId,
 					operation,
 					timestamp: new Date().toISOString(),
 				};
 
-				// Add more context if available
-				if (error.response) {
-					errorDetails.httpStatus = error.response.status;
-					errorDetails.httpStatusText = error.response.statusText;
-					
-					// Try to extract API error details
-					if (error.response.data) {
-						try {
-							const errorData = typeof error.response.data === 'string' 
-								? JSON.parse(error.response.data) 
-								: error.response.data;
-							
-							if (errorData.error) {
-								errorMessage = errorData.error;
-							} else if (errorData.message) {
-								errorMessage = errorData.message;
-							}
-							
-							errorDetails.apiError = errorData;
-						} catch {
-							errorDetails.rawResponse = error.response.data;
-						}
-					}
+				// What orshotRequest learned from the API's answer.
+				if (error.orshot) {
+					errorDetails.httpStatus = error.orshot.status;
+					if (error.orshot.code) errorDetails.code = error.orshot.code;
+					if (error.orshot.helpUrl) errorDetails.helpUrl = error.orshot.helpUrl;
 				}
+				const errorHintText = typeof error.description === 'string' ? error.description : '';
+				if (errorHintText) errorDetails.hint = errorHintText;
 
 				if (this.continueOnFail()) {
 					returnData.push({
-						json: { 
+						json: {
 							error: errorMessage,
 							errorDetails,
 						},
 						pairedItem: itemIndex,
 					});
 				} else {
-					if (error.context) {
-						error.context.itemIndex = itemIndex;
-						throw new NodeApiError(this.getNode(), error as JsonObject, {
+					// One way out for every failure, carrying the message, what to do
+					// about it, and the item it happened on.
+					if (error instanceof NodeOperationError) {
+						throw new NodeOperationError(this.getNode(), errorMessage, {
 							itemIndex,
-							message: errorMessage,
+							description: errorHintText || undefined,
 						});
 					}
-					throw new NodeOperationError(this.getNode(), errorMessage, {
+					throw new NodeApiError(this.getNode(), error as JsonObject, {
+						message: errorMessage,
+						description: errorHintText || undefined,
+						httpCode: error.httpCode ?? undefined,
 						itemIndex,
-						description: errorDetails,
 					});
 				}
 			}

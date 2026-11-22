@@ -1,0 +1,35 @@
+{
+	"node": "@thelifeofrishi/n8n-nodes-orshot.orshot",
+	"nodeVersion": "1.0",
+	"codexVersion": "1.0",
+	"categories": ["Marketing & Content", "Development"],
+	"alias": [
+		"image",
+		"image generation",
+		"pdf",
+		"pdf generation",
+		"video",
+		"video generation",
+		"template",
+		"render",
+		"social media image",
+		"og image",
+		"certificate",
+		"invoice",
+		"banner",
+		"carousel",
+		"thumbnail"
+	],
+	"resources": {
+		"primaryDocumentation": [
+			{
+				"url": "https://orshot.com/docs/integrations/n8n"
+			}
+		],
+		"credentialDocumentation": [
+			{
+				"url": "https://orshot.com/docs"
+			}
+		]
+	}
+}
